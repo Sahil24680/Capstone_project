@@ -1,6 +1,9 @@
 import { Mail, Lock, Apple } from "lucide-react";
 import { Button } from "@/app/components/ui/Button";
 import { Input } from "@/app/components/ui/Input";
+import { createClient } from "@/utils/supabase/client";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 
 interface Authprops {
   title: string;
@@ -10,6 +13,7 @@ interface Authprops {
   link: string;
 }
 
+
 const Auth_Form = ({
   title,
   button_txt,
@@ -17,6 +21,125 @@ const Auth_Form = ({
   sub_text,
   link,
 }: Authprops) => {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [showPasswordReset, setShowPasswordReset] = useState(false);
+  const router = useRouter();
+  const supabase = createClient();
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+    setMessage("");
+
+    try {
+      if (is_login) {
+        //Handle login
+        const {error} = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+
+        if (error) throw error;
+
+        setMessage("Login successful! Redirecting...");
+        router.push("/"); //Redirect to home page
+      } else {
+        //Handle signup
+        const {error} = await supabase.auth.signUp({
+          email,
+          password,
+        });
+
+        if (error) throw error;
+
+        setMessage("Check your email for the confirmation link!");
+      }
+    } catch (error: any) {
+      setError(error.message || "An error occurred");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+
+  //Google sign in
+  const handleGoogleAuth = async () => {
+    setLoading(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const {error} = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/`
+        }
+      });
+
+      if (error) throw error;
+    } catch (error: any) {
+      setError(error.message || "An error occurred with Google authentication");
+      setLoading(false);
+    }
+  };
+
+
+  //GitHub sign in
+  const handleGitHubAuth = async () => {
+    setLoading(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const {error} = await supabase.auth.signInWithOAuth({
+        provider: 'github',
+        options: {
+          redirectTo: `${window.location.origin}/`
+        }
+      });
+
+      if (error) throw error;
+    } catch (error: any) {
+      setError(error.message || "An error occurred with GitHub authentication");
+      setLoading(false);
+    }
+  };
+
+
+  //Password reset
+  const handlePasswordReset = async () => {
+    if (!email.trim()) {
+      setError("Please enter your email address first");
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/auth/reset-password`,
+      });
+
+      if (error) throw error;
+
+      setMessage("Password reset email sent! Check your inbox.");
+      setShowPasswordReset(false);
+    } catch (error: any) {
+      setError(error.message || "An error occurred sending password reset email");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+
+
   return (
     <div className="min-h-screen bg-white flex items-center justify-center font-inter relative">
       {/* Background tech elements */}
@@ -96,15 +219,32 @@ const Auth_Form = ({
             </p>
           </div>
 
-          {/* Login form */}
-          <form className="space-y-6">
+          {/* Auth form */}
+          <form onSubmit={handleSubmit} className="space-y-6">
+            {/* Error message */}
+            {error && (
+              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+                {error}
+              </div>
+            )}
+
+            {/* Success message */}
+            {message && (
+              <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg text-sm">
+                {message}
+              </div>
+            )}
+
             {/* Email field */}
             <Input
               name="email"
               type="email"
               placeholder="email address"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
               leftIcon={<Mail className="h-5 w-5 text-slate-400" />}
               required
+              disabled={loading}
             />
 
             {/* Password field */}
@@ -113,24 +253,63 @@ const Auth_Form = ({
                 name="password"
                 type="password"
                 placeholder="Password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
                 leftIcon={<Lock className="h-5 w-5 text-slate-400" />}
                 required
+                disabled={loading}
               />
               {is_login && (
                 <div className="flex justify-end mt-2">
-                  <a
-                    href="#"
-                    className="text-orange-600 hover:text-orange-500 text-sm transition-colors font-medium"
+                  <button
+                    type="button"
+                    onClick={handlePasswordReset}
+                    disabled={loading}
+                    className="text-orange-600 hover:text-orange-500 text-sm transition-colors font-medium disabled:opacity-50"
                   >
                     Forgot password?
-                  </a>
+                  </button>
                 </div>
               )}
             </div>
 
-            {/* Login button */}
-            <Button type="submit" fullWidth className="py-3">
-              {button_txt}
+            {/* Submit button */}
+            <Button type="submit" fullWidth className="py-3" disabled={loading}>
+              {loading ? "Loading..." : button_txt}
+            </Button>
+
+            {/* Divider */}
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-slate-300"></div>
+              </div>
+              <div className="relative flex justify-center text-sm">
+                <span className="px-2 bg-white text-slate-500">Or continue with</span>
+              </div>
+            </div>
+
+            {/* Google sign in button */}
+            <Button
+              type="button"
+              onClick={handleGoogleAuth}
+              fullWidth
+              className="py-3 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 flex items-center justify-center gap-3"
+              disabled={loading}
+            >
+              <img src="/images/google_icon.png" alt="Google" className="w-5 h-5"/>
+              {loading ? "Loading..." : `Continue with Google`}
+            </Button>
+
+            {/* GitHub sign in button */}
+            <Button
+              type="button"
+              onClick={handleGitHubAuth}
+              fullWidth
+              className="py-3 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 flex items-center justify-center gap-3"
+              disabled={loading}
+            >
+              <img src="/images/github_icon.png" alt="GitHub" className="w-5 h-5"/>
+              {loading ? "Loading..." : `Continue with GitHub`}
             </Button>
           </form>
         </div>
