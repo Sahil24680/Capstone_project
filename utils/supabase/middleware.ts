@@ -1,10 +1,6 @@
-// utils/supabase/middleware.ts
-
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
-// Base response we'll return
-// Cookies may be attached later by setAll()
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
     request,
@@ -13,11 +9,10 @@ export async function updateSession(request: NextRequest) {
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
-    {
+    {  
       cookies: {
-        // Read cookies from the incoming request so the server knows who the user is
         getAll() {
-          return request.cookies.getAll() 
+          return request.cookies.getAll()
         },
         setAll(cookiesToSet) {
           cookiesToSet.forEach(({ name, value, options }) => request.cookies.set(name, value))
@@ -35,10 +30,9 @@ export async function updateSession(request: NextRequest) {
   // Do not run code between createServerClient and
   // supabase.auth.getUser(). A simple mistake could make it very hard to debug
   // issues with users being randomly logged out.
+
   // IMPORTANT: DO NOT REMOVE auth.getUser()
 
-
-  // Trigger a session check/refresh. Do not insert code above this block.
   const {
     data: { user },
   } = await supabase.auth.getUser()
@@ -46,12 +40,13 @@ export async function updateSession(request: NextRequest) {
   if (
     !user &&
     !request.nextUrl.pathname.startsWith('/login') &&
-    !request.nextUrl.pathname.startsWith('/auth') &&
-    !request.nextUrl.pathname.startsWith('/error')
+    !request.nextUrl.pathname.startsWith('/auth')&&
+    !request.nextUrl.pathname.startsWith('/home')
+    
   ) {
     // no user, potentially respond by redirecting the user to the login page
     const url = request.nextUrl.clone()
-    url.pathname = '/login'
+    url.pathname = '/auth/login'
     return NextResponse.redirect(url)
   }
 
