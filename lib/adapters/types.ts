@@ -1,4 +1,4 @@
-// lib/types.ts
+// lib/adapters/types.ts
 export type AtsProvider = "greenhouse" | "web";
 
 // Minimal “features” bag to enrich later (or with NLP)
@@ -12,42 +12,59 @@ export type GHCanon = {
   salary_source?: "metadata" | "text" | "jsonld";
 };
 
+// A generic adapter function type for the registry and callers.
+export type Adapter = (...args: any[]) => Promise<AdapterJob | null>;
+
 export type AdapterJob = {
-  ats_provider: AtsProvider;
-  tenant_slug: string;            
-  external_job_id: string;        
+  ats_provider: AtsProvider;          
+  tenant_slug: string;                
+  external_job_id: string;           
   title: string;
   company_name: string;
   location: string;
   absolute_url: string;
-  first_published: string | null; // ISO 8601
-  updated_at: string | null;      // ISO 8601
+  first_published: string | null;     // ISO
+  updated_at: string | null;          // ISO
   requisition_id: string | null;
-  content: string | null;         // raw HTML
+  content: string | null;             // raw HTML
+
   raw_json: {
     source?: "web" | "greenhouse";
-    // HTTP + fetch metadata (debugging, dedup, cacheing)
-    http?: {
-      status: number;
-      fetched_at: string;         // ISO when fetched
-      content_length: number | null; // bytes (from header or computed)
-      sha256: string;             // checksum of body
-    };
+
+    // Provenance of the canonical candidate
     canonical_candidate?: {
       ats: AtsProvider;
       tenant_slug: string;
       external_job_id: string;
       absolute_url: string;
-      provenance: "jsonld" | "text_only" | "mixed";
+      provenance: "api" | "jsonld" | "text_only" | "mixed";
     };
-    // as-captured JSON-LD
+
+    // HTTP/fetch diagnostics for observability & retries
+    fetch?: {
+      status: number;
+      ok: boolean;
+      started_at: string;             // ISO
+      finished_at: string;            // ISO
+      elapsed_ms: number;
+    };
+
+    // Body metrics for dedupe/change detection
+    content_metrics?: {
+      length_bytes: number;           // size of body (utf8)
+      sha1: string;                   // checksum of body
+    };
+
+    // If page provided JSON-LD JobPosting, keep it verbatim for NLP
     jsonld?: any;
-    // any source-specific leftovers
+
+    // room for provider-specific fields (GH payload, etc.)
     [k: string]: any;
   };
-  // ingestion hints that the downstream pipeline can read
+
+  // Ingestion hints for downstream pipeline
   _ingest?: {
-    needs_nlp: boolean;           // true = queue this doc for NLP enrichment
-    reason?: string;              // short reason for triage
+    needs_nlp: boolean;               // If true, queue for NLP enrichment
+    reason?: string;                  // optional triage note
   };
 };
