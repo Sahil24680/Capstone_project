@@ -1,3 +1,4 @@
+// lib/analyzeJob.ts
 export type Tier = "Low" | "Medium" | "High";
 
 export interface RiskResult {

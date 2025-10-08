@@ -1,6 +1,10 @@
+// lib/adapters/index.ts
 import { greenhouseAdapter } from "./greenhouse";
-import type { Adapter, AtsProvider } from "./types";
+import { webAdapter } from "./web";
+import type { AtsProvider } from "./types";
 
-export const adapters: Record<AtsProvider, Adapter> = {
+// Map of adapter entry points, add as expanded.
+export const adapters: Record<AtsProvider, any> = {
   greenhouse: greenhouseAdapter,
+  web: webAdapter,
 };
