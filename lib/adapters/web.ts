@@ -1,246 +1,156 @@
 // lib/adapters/web.ts
-import crypto from "node:crypto";
+import { z } from "zod";
 import type { AdapterJob } from "./types";
 import { fetchWithRetry, sha1Hex } from "./util";
 
-/**
- * Small utility: canonical-ish domain name
- */
-function domainToCompany(host: string): string {
-  const h = host.replace(/^www\./, "");
-  return h.split(".")[0].replace(/-/g, " ");
+/** Tiny helper to decode a few common HTML entities in <script> contents. */
+function decodeBasicEntities(s: string): string {
+  return s
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
 }
 
-/**
- * Grab the first <title>...</title> for a fallback title
- */
-function extractHtmlTitle(html: string): string | null {
-  const m = html.match(/<title[^>]*>([^<]+)<\/title>/i);
-  return m ? m[1].trim() : null;
-}
-
-/**
- * Try to find JSON-LD blocks and pull a JobPosting-like object.
- * Returns the first object that looks like a JobPosting (or null).
- */
-function tryParseJsonLd(html: string): any | null {
-  const blocks = [...html.matchAll(
-    /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi
-  )];
-
-  for (const b of blocks) {
-    const raw = b[1]?.trim();
-    if (!raw) continue;
-    try {
-      const parsed = JSON.parse(raw);
-
-      // JSON-LD can be an object or an array or @graph
-      const candidates: any[] = Array.isArray(parsed)
-        ? parsed
-        : parsed?.["@graph"] && Array.isArray(parsed["@graph"])
-        ? parsed["@graph"]
-        : [parsed];
-
-      for (const c of candidates) {
-        const t = (c?.["@type"] || c?.type || "").toString().toLowerCase();
-        if (t === "jobposting" || t.includes("jobposting")) {
-          return c;
-        }
-      }
-    } catch {
-      // ignore JSON parse errors
-    }
+/** Extract all <script type="application/ld+json">...</script> blocks. */
+function extractJsonLdBlocks(html: string): string[] {
+  const blocks: string[] = [];
+  const re =
+    /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const raw = (m[1] ?? "").trim();
+    if (raw) blocks.push(raw);
   }
-  return null;
+  return blocks;
 }
 
-/**
- * Coerce possibly weird date strings to ISO (or null).
- */
-function safeIsoDate(s: any): string | null {
-  if (!s || typeof s !== "string") return null;
-  const d = new Date(s);
-  return isNaN(d.valueOf()) ? null : d.toISOString();
-}
-
-/**
- * Build location string from JSON-LD jobLocation(s).
- */
-function locationFromJsonLd(jsonld: any): string {
+/** Best-effort JSON parse with very light cleanup. Returns undefined if it can’t parse. */
+function safeParseJsonLd(s: string): unknown | undefined {
   try {
-    const jl = jsonld?.jobLocation;
-    const arr = Array.isArray(jl) ? jl : jl ? [jl] : [];
-    const seen = new Set<string>();
-    for (const node of arr) {
-      const addr = node?.address || node?.jobLocation?.address;
-      if (!addr) continue;
-      const city = addr.addressLocality || addr.addressRegion || "";
-      const region = addr.addressRegion || "";
-      const country = addr.addressCountry || "";
-      const parts = [city, region, country].filter(Boolean);
-      if (parts.length) seen.add(parts.join(", "));
+    // Some sites HTML-escape the JSON text inside the script tag.
+    const de = decodeBasicEntities(s.trim());
+    return JSON.parse(de);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Zod: Don’t assume a specific JSON-LD shape; just ensure it’s JSON. */
+const ZJsonLdAny = z.unknown();
+
+/** Narrow provenance to the allowed union used elsewhere. */
+type Provenance = "jsonld" | "api" | "text_only" | "mixed";
+
+export async function webAdapter(url: string): Promise<AdapterJob | null> {
+  // Validate URL early (throws if invalid)
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(url);
+  } catch {
+    return null;
+  }
+
+  const started = new Date();
+  const res = await fetchWithRetry(
+    url,
+    {
+      headers: {
+        "User-Agent": "jobbusters/0.1 (+https://example.com)",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      },
+    },
+    {
+      retries: 2,
+      baseDelayMs: 300,
+      timeoutMs: 12_000,
     }
-    if (seen.size) return [...seen].join(" • ");
-  } catch {}
-  return "";
-}
+  );
+  const finished = new Date();
 
-/**
- * Company display name from JSON-LD
- */
-function companyFromJsonLd(jsonld: any, host: string): string {
-  const org = jsonld?.hiringOrganization;
-  const maybeName =
-    (typeof org === "string" && org) ||
-    org?.name ||
-    jsonld?.industry ||
-    jsonld?.department ||
-    null;
-  return (maybeName || domainToCompany(host));
-}
+  if (!res.ok) return null;
 
-/**
- * ---------- key helpers ----------
- */
-export function buildWebJobKey(rawUrl: string): {
-  ats_provider: "web";
-  tenant_slug: string;
-  external_job_id: string;
-} {
-  const u = new URL(rawUrl);
-  const host = u.host.toLowerCase();
-  // Stable, deterministic id for the exact URL
-  const hash = crypto
-    .createHash("sha1")
-    .update(u.toString())
-    .digest("hex")
-    .slice(0, 16);
-  return {
-    ats_provider: "web",
-    tenant_slug: host,
-    external_job_id: hash,
-  };
-}
+  const html = await res.text();
+  const htmlBuf = Buffer.from(html ?? "", "utf8");
 
-/**
- * Main adapter for arbitrary job pages on the public web.
- * Strategy: fetch → prefer JSON-LD JobPosting → fallback to light HTML signals
- */
-export async function webAdapter(rawUrl: string): Promise<AdapterJob | null> {
-  const startedAt = new Date();
-  const { ats_provider, tenant_slug, external_job_id } = buildWebJobKey(rawUrl);
+  // ---- JSON-LD discovery ----
+  const ldScriptBlocks = extractJsonLdBlocks(html);
+  const parsedBlocks = ldScriptBlocks
+    .map(safeParseJsonLd)
+    .filter((v): v is unknown => v !== undefined);
 
-  // fetch
- const res = await fetchWithRetry(rawUrl, {
-  headers: {
-    "user-agent": "Mozilla/5.0 (compatible; CapstoneJobIngest/1.0; +https://example.invalid)",
-    accept: "text/html,application/xhtml+xml,application/json,application/ld+json;q=0.9,*/*;q=0.8",
-  },
-});
-
-
-  // body text (even for non-200, keep it around for debugging/NLP retries)
-  const body = await res.text();
-  const finishedAt = new Date();
-
-  // record content metrics for dedupe/debug/auditing
-  const contentLength = Buffer.byteLength(body, "utf8");
-  const bodySha1 = crypto.createHash("sha1").update(body).digest("hex");
-
-  // scrape-ish: JSON-LD first
-  const jsonld = tryParseJsonLd(body);
-
-  const u = new URL(rawUrl);
-  const host = u.host.toLowerCase();
-
-  // Title
-  const titleFromJsonld =
-    (jsonld?.title ||
-      jsonld?.name ||
-      (typeof jsonld?.identifier === "string" ? null : jsonld?.identifier?.name)) ??
-    null;
-  const title =
-    (typeof titleFromJsonld === "string" && titleFromJsonld.trim()) ||
-    extractHtmlTitle(body) ||
-    "Job";
-
-  // Company
-  const company_name = companyFromJsonLd(jsonld, host);
-
-  // Location
-  const location =
-    (typeof jsonld?.jobLocation === "string" && jsonld.jobLocation) ||
-    locationFromJsonLd(jsonld) ||
-    "";
-
-  // Dates
-  const first_published =
-    safeIsoDate(jsonld?.datePosted) ||
-    safeIsoDate(jsonld?.datePublished) ||
-    null;
-
-  // Requisition id (if spotted in jsonld.identifier/#)
-  let requisition_id: string | null = null;
-  if (jsonld?.identifier) {
-    if (typeof jsonld.identifier === "string") {
-      requisition_id = jsonld.identifier.trim() || null;
-    } else if (typeof jsonld.identifier === "object") {
-      requisition_id =
-        jsonld.identifier?.value ||
-        jsonld.identifier?.id ||
-        jsonld.identifier?.name ||
-        null;
-      if (requisition_id && typeof requisition_id !== "string") {
-        requisition_id = String(requisition_id);
-      }
+  // Flatten simple arrays like: <script>[{..},{..}]</script>
+  // but otherwise keep as “mixed bag of unknowns”
+  const jsonld: unknown[] = [];
+  for (const blk of parsedBlocks) {
+    if (Array.isArray(blk)) {
+      for (const item of blk) jsonld.push(item);
+    } else {
+      jsonld.push(blk);
     }
   }
 
-  // Canonical candidate provenance (jsonld vs text_only)
-  const provenance = jsonld ? "jsonld" : "text_only";
+  // Validate the parsed JSON-LD array elements (keep them as unknown, but validated JSON)
+  const validatedJsonLd: unknown[] = [];
+  for (const item of jsonld) {
+    const v = ZJsonLdAny.safeParse(item);
+    if (v.success) validatedJsonLd.push(v.data);
+  }
 
-  // Build the AdapterJob
-  const job: AdapterJob = {
-    ats_provider,                    // "web"
-    tenant_slug: host,               // domain as "tenant"
-    external_job_id,                 // deterministic hash of URL
-    title,
-    company_name,
-    location,
-    absolute_url: u.toString(),
-    first_published,
-    updated_at: finishedAt.toISOString(),
-    requisition_id,
-    content: body,                   // raw HTML; NLP will derive clean text later
+  // Decide provenance from what was actually found
+  const provenance: Provenance =
+    validatedJsonLd.length > 0 ? "jsonld" : "text_only";
+
+  // Build the normalized job
+  const normalized: AdapterJob = {
+    ats_provider: "web",
+    tenant_slug: parsedUrl.hostname, // e.g., "boards.greenhouse.io" or site host
+    external_job_id: sha1Hex(Buffer.from(url, "utf8")),
+
+    // Don’t parse title/company/location here; leave that to the normalizer/web step
+    title: "",
+    company_name: parsedUrl.hostname,
+    location: "",
+    absolute_url: url,
+
+    first_published: null,
+    updated_at: finished.toISOString(),
+
+    requisition_id: null,
+
+    // Keep the raw HTML so the normalizer can extract text & features
+    content: html || null,
+
     raw_json: {
-      source: "web",
+      jsonld: validatedJsonLd,
+
       canonical_candidate: {
         ats: "web",
-        tenant_slug: host,
-        external_job_id,
-        absolute_url: u.toString(),
+        tenant_slug: parsedUrl.hostname,
+        external_job_id: sha1Hex(Buffer.from(url, "utf8")),
+        absolute_url: url,
         provenance,
       },
-      // --- fetch/ingest diagnostics ---
+
       fetch: {
-        status: res.status,                // HTTP status code
+        status: res.status,
         ok: res.ok,
-        started_at: startedAt.toISOString(),
-        finished_at: finishedAt.toISOString(),
-        elapsed_ms: finishedAt.getTime() - startedAt.getTime(),
+        started_at: started.toISOString(),
+        finished_at: finished.toISOString(),
+        elapsed_ms: Math.max(0, finished.getTime() - started.getTime()),
       },
+
       content_metrics: {
-        length_bytes: contentLength,       // size of HTML in bytes (helps spot truncated pages)
-        sha1: bodySha1,                    // stable fingerprint for dedupe/change detection
+        length_bytes: htmlBuf.byteLength,
+        sha1: sha1Hex(htmlBuf),
       },
-      jsonld: jsonld || undefined,         // keep the parsed JSON-LD if present
-      _ingest: {
-        // Signal to downstream that this page still needs semantic extraction.
-        // Set to true unless all must-have fields already filled elsewhere.
-        needsnlp: true,
-      },
+
+      _ingest: { needsnlp: true },
     },
   };
 
-  return job;
+  return normalized;
 }
+
+export default webAdapter;

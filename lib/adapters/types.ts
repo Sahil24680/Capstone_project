@@ -1,70 +1,90 @@
 // lib/adapters/types.ts
+
 export type AtsProvider = "greenhouse" | "web";
 
-// Minimal “features” bag to enrich later (or with NLP)
-export type GHCanon = {
-  time_type?: string;
-  salary_min?: number;
-  salary_mid?: number;
-  salary_max?: number;
-  currency?: string;
-  department?: string;
-  salary_source?: "metadata" | "text" | "jsonld";
+export type Provenance =
+  | "api"      // fetched from a provider API
+  | "jsonld"   // parsed from JSON-LD on a web page
+  | "text_only"// parsed only from visible text/HTML
+  | "mixed";   // combined/multiple sources
+
+export type CanonicalCandidate = {
+  ats: AtsProvider;
+  tenant_slug: string;
+  external_job_id: string;
+  absolute_url: string;
+  provenance: Provenance;
 };
 
-// A generic adapter function type for the registry and callers.
-export type Adapter = (...args: any[]) => Promise<AdapterJob | null>;
+export type FetchMeta = {
+  status: number;
+  ok: boolean;
+  started_at: string;   // ISO
+  finished_at: string;  // ISO
+  elapsed_ms: number;
+};
+
+export type ContentMetrics = {
+  length_bytes: number;
+  sha1: string;
+};
+
+/**
+ * Raw JSON we keep for provenance/debug/NLP.
+ * We define the meta fields we know about, and allow arbitrary extras.
+ */
+export type AdapterRawJson = {
+  /** Optional source tag to note the origin */
+  source?: AtsProvider;
+
+  /** Canonical candidate pointer for traceability */
+  canonical_candidate?: CanonicalCandidate;
+
+  /** HTTP fetch metadata for the adapter call */
+  fetch?: FetchMeta;
+
+  /** Size & hash of the content we stored */
+  content_metrics?: ContentMetrics;
+
+  /** NLP ingestion flags, etc. */
+  _ingest?: { needsnlp?: boolean };
+
+  /** If present for web pages: the original JSON-LD block(s) */
+  jsonld?: unknown;
+} & Record<string, unknown>; // allow provider/site-specific fields
 
 export type AdapterJob = {
-  ats_provider: AtsProvider;          
-  tenant_slug: string;                
-  external_job_id: string;           
+  ats_provider: AtsProvider;
+  tenant_slug: string;
+  external_job_id: string;
+
   title: string;
   company_name: string;
   location: string;
   absolute_url: string;
-  first_published: string | null;     // ISO
-  updated_at: string | null;          // ISO
+
+  first_published: string | null; // ISO or null if unknown
+  updated_at: string;             // ISO
+
   requisition_id: string | null;
-  content: string | null;             // raw HTML
 
-  raw_json: {
-    source?: "web" | "greenhouse";
+  /** Raw HTML (for web) or job content (for GH), or null if none */
+  content: string | null;
 
-    // Provenance of the canonical candidate
-    canonical_candidate?: {
-      ats: AtsProvider;
-      tenant_slug: string;
-      external_job_id: string;
-      absolute_url: string;
-      provenance: "api" | "jsonld" | "text_only" | "mixed";
-    };
+  /** Provider/web-specific raw payload + standardized meta */
+  raw_json: AdapterRawJson;
 
-    // HTTP/fetch diagnostics for observability & retries
-    fetch?: {
-      status: number;
-      ok: boolean;
-      started_at: string;             // ISO
-      finished_at: string;            // ISO
-      elapsed_ms: number;
-    };
-
-    // Body metrics for dedupe/change detection
-    content_metrics?: {
-      length_bytes: number;           // size of body (utf8)
-      sha1: string;                   // checksum of body
-    };
-
-    // If page provided JSON-LD JobPosting, keep it verbatim for NLP
-    jsonld?: any;
-
-    // room for provider-specific fields (GH payload, etc.)
-    [k: string]: any;
-  };
-
-  // Ingestion hints for downstream pipeline
-  _ingest?: {
-    needs_nlp: boolean;               // If true, queue for NLP enrichment
-    reason?: string;                  // optional triage note
-  };
+  /** Optional, normalized features extracted by normalizers */
+  features?: Record<string, unknown>;
 };
+
+/** Concrete adapter function types */
+export type GreenhouseAdapter = (
+  tenant_slug: string,
+  external_job_id: string
+) => Promise<AdapterJob | null>;
+
+export type WebAdapter = (url: string) => Promise<AdapterJob | null>;
+
+/** Single “Adapter” union: */
+export type Adapter = GreenhouseAdapter | WebAdapter;

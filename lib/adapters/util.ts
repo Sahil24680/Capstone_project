@@ -55,8 +55,22 @@ export async function fetchWithRetry(
   }
 }
 
-export function isFiniteNumber(n: any): n is number {
+export function isFiniteNumber(n: unknown): n is number {
   return typeof n === "number" && Number.isFinite(n);
+}
+
+
+/**
+ * Coerce number-ish strings like "100000" or "100,000.00" to numbers.
+ * Returns `undefined` when the input isn't a finite number.
+ */
+export function asNum(x: unknown): number | undefined {
+  if (typeof x === "number" && Number.isFinite(x)) return x;
+  if (typeof x === "string") {
+    const n = parseFloat(x.replace(/[, ]+/g, ""));
+    if (Number.isFinite(n)) return n;
+  }
+  return undefined;
 }
 
 // simple, safe-ish HTML→text (not overdone pre-NLP)

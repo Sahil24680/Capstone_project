@@ -1,194 +1,296 @@
 // lib/normalizers/web.ts
+import { z } from "zod";
+import { asNum } from "../adapters/util";
+
+export type WebCompPeriod = "hour" | "year";
 export type WebFeatures = {
-  // salary
   salary_min?: number;
   salary_mid?: number;
   salary_max?: number;
   currency?: string;
-  salary_source?: "text" | "jsonld";
-
-  // misc (best-effort; leave blank if unknown)
-  title?: string;
-  company_name?: string;
-  location?: string;
-  posted_at?: string;          // ISO string if it can be inferred
-  employment_type?: string;    // e.g., "Full-time"
+  comp_period?: WebCompPeriod;
+  salary_source?: "jsonld" | "text";
 };
 
-export function mergeWebFeatures<T extends Record<string, any>>(
-  primary: T | undefined,
-  fallback: T | undefined
-): T {
-  const a = primary ?? ({} as T);
-  const b = fallback ?? ({} as T);
-  const out: Record<string, any> = { ...b, ...a };
-  return out as T;
-}
-
-/**
- * Minimal HTML → plain text (safe for job content).
- */
 export function htmlToPlainText(html: string): string {
   if (!html) return "";
-  let s = html;
 
-  // remove script/style
-  s = s.replace(/<script[\s\S]*?<\/script>/gi, "");
-  s = s.replace(/<style[\s\S]*?<\/style>/gi, "");
+  const named: Record<string, string> = {
+    amp: "&",
+    lt: "<",
+    gt: ">",
+    quot: '"',
+    apos: "'",
+    nbsp: " ",
+  };
 
-  // block-level tags to newline
-  s = s.replace(/<\/(p|div|h\d|li|ul|ol|br|section|article|header|footer)>/gi, "\n");
+  const decodeEntities = (s: string) =>
+    s.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (_m, g1: string) => {
+      if (g1[0] === "#") {
+        const hex = g1[1]?.toLowerCase() === "x";
+        const code = parseInt(hex ? g1.slice(2) : g1.slice(1), hex ? 16 : 10);
+        if (Number.isFinite(code)) return String.fromCodePoint(code);
+        return _m;
+      }
+      return Object.prototype.hasOwnProperty.call(named, g1) ? named[g1] : _m;
+    });
 
-  // strip tags
-  s = s.replace(/<[^>]+>/g, " ");
+  let text = decodeEntities(String(html));
 
-  // decode a few common entities
-  s = s
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">");
+  text = text
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n\n")
+    .replace(/<\/li>/gi, "\n")
+    .replace(/<\/h[1-6]>/gi, "\n\n")
+    .replace(/<\/div>/gi, "\n");
 
-  // normalize whitespace
-  s = s.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
-  return s;
+  text = text.replace(/<[^>]+>/g, "");
+
+  text = text
+    .replace(/\u00A0/g, " ")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  return text;
 }
 
-  // "170,000" | "170" + k
-function parseMoneyPart(numStr: string, kFlag?: string): number | undefined {
-  const n = Number(String(numStr).replace(/,/g, ""));
-  if (!Number.isFinite(n)) return undefined;
-  return kFlag ? n * 1000 : n;
+/* ------------------------------ Zod Schemas ------------------------------ */
+/** https://schema.org/QuantitativeValue */
+const ZQuantitativeValue = z
+  .object({
+    "@type": z.string().optional(),
+    minValue: z.union([z.number(), z.string()]).optional(),
+    maxValue: z.union([z.number(), z.string()]).optional(),
+    value: z.union([z.number(), z.string()]).optional(),
+    unitText: z.string().optional(), // e.g., HOUR, YEAR
+  })
+  .catchall(z.unknown());
+
+/** https://schema.org/MonetaryAmount */
+const ZMonetaryAmount = z
+  .object({
+    "@type": z.string().optional(),
+    currency: z.string().optional(), // e.g., USD
+    value: z
+      .union([
+        ZQuantitativeValue, // object
+        z.number(), // simple number
+        z.string(), // sometimes stringy number
+      ])
+      .optional(),
+  })
+  .catchall(z.unknown());
+
+/** Minimal JobPosting subset of concern */
+const ZJobPosting = z
+  .object({
+    "@type": z.string().optional(), // "JobPosting"
+    title: z.string().optional(),
+    hiringOrganization: z
+      .object({
+        name: z.string().optional(),
+      })
+      .catchall(z.unknown())
+      .optional(),
+    baseSalary: ZMonetaryAmount.optional(),
+  })
+  .catchall(z.unknown());
+
+/** Accept an object or array of objects; only care about JobPosting items */
+const ZJsonLdTop = z.union([ZJobPosting, z.array(z.union([ZJobPosting, z.unknown()]))]);
+
+/* ----------------------- Salary helpers / finalization -------------------- */
+function finalizeSalary(features: WebFeatures) {
+  const has = (n: unknown) => typeof n === "number" && Number.isFinite(n);
+
+  let min = features.salary_min;
+  let mid = features.salary_mid;
+  let max = features.salary_max;
+
+  // Keep ordering sane if both provided
+  if (has(min) && has(max) && (min as number) > (max as number)) {
+    const t = min as number;
+    min = max as number;
+    max = t;
+  }
+
+  // Only compute midpoint when both bounds exist
+  if (!has(mid) && has(min) && has(max)) {
+    mid = ((min as number) + (max as number)) / 2;
+  }
+
+  // Do not infer a missing bound from midpoint
+  // Do not mirror a single bound into the other
+  // Do not clamp mid to [min, max]
+
+  if (has(min)) features.salary_min = min as number;
+  if (has(mid)) features.salary_mid = mid as number;
+  if (has(max)) features.salary_max = max as number;
 }
 
-function detectCurrencySymbolOrCode(chunk: string): string | undefined {
-  if (/[€]/.test(chunk)) return "EUR";
-  if (/[£]/.test(chunk)) return "GBP";
-  if (/\$/.test(chunk)) return "USD";
-  // fallbacks on codes
-  if (/usd\b/i.test(chunk)) return "USD";
-  if (/\beur\b/i.test(chunk)) return "EUR";
-  if (/\bgbp\b/i.test(chunk)) return "GBP";
-  return undefined;
+/* ------------------------------ JSON-LD parse ----------------------------- */
+export function extractWebFeaturesFromJsonLd(jsonld: unknown): WebFeatures {
+  const features: WebFeatures = {};
+
+  const parsed = ZJsonLdTop.safeParse(jsonld);
+  if (!parsed.success) return features;
+
+  type UnknownObj = { [k: string]: unknown };
+  const isJobPostingLite = (u: unknown): u is UnknownObj =>
+    !!u && typeof u === "object" && "@type" in (u as UnknownObj);
+
+const items: Array<z.infer<typeof ZJobPosting>> = Array.isArray(parsed.data)
+  ? parsed.data.filter((it): it is z.infer<typeof ZJobPosting> =>
+      isJobPostingLite(it) && it["@type"] === "JobPosting")
+  : [parsed.data];
+
+
+  for (const jp of items) {
+    const ma = jp.baseSalary;
+    if (!ma) continue;
+
+    let currency = (ma.currency ?? "").toString().trim().toUpperCase() || undefined;
+
+    let min: number | undefined;
+    let mid: number | undefined;
+    let max: number | undefined;
+    let period: WebCompPeriod | undefined;
+
+   type Quantitative = z.infer<typeof ZQuantitativeValue>;
+
+  if (ma.value && typeof ma.value === "object" && !Array.isArray(ma.value)) {
+    const qv = ma.value as Quantitative;
+    const minV = asNum(qv.minValue);
+    const maxV = asNum(qv.maxValue);
+    const valV = asNum(qv.value);
+
+    const unitText = (qv.unitText ?? "").toString().toUpperCase();
+      if (unitText.includes("HOUR")) period = "hour";
+      else if (unitText.includes("YEAR") || unitText.includes("ANNUAL")) period = "year";
+
+      if (minV !== undefined) min = minV;
+      if (maxV !== undefined) max = maxV;
+      if (valV !== undefined) mid = valV; // treat lone value as midpoint
+    } else {
+      // Flat number or string number on MonetaryAmount.value
+      const flat = asNum(ma.value as unknown);
+      if (flat !== undefined) {
+        mid = flat;
+      }
+    }
+
+    // Heuristic fallback for comp period if still unknown:
+    if (!period && (min ?? mid ?? max) !== undefined) {
+      const probe = (min ?? mid ?? max)!;
+      period = probe <= 300 ? "hour" : "year";
+    }
+
+    // Commit into features (don't overwrite existing if already set)
+    if (min !== undefined && features.salary_min == null) features.salary_min = min;
+    if (mid !== undefined && features.salary_mid == null) features.salary_mid = mid;
+    if (max !== undefined && features.salary_max == null) features.salary_max = max;
+    if (currency && !features.currency) features.currency = currency;
+    if (period && !features.comp_period) features.comp_period = period;
+
+    if (min !== undefined || mid !== undefined || max !== undefined) {
+      features.salary_source ??= "jsonld";
+    }
+  }
+
+  finalizeSalary(features);
+  return features;
 }
 
-/**
- * Extract features from text only (no DOM, no JSON-LD).
- * Returns an object; never mutates external state.
- */
+/* ------------------------------ Text fallback ---------------------------- */
 export function extractWebFeaturesFromText(text: string): WebFeatures {
-  const out: WebFeatures = {};
-  if (!text) return out;
+  const features: WebFeatures = {};
+  if (!text) return features;
+  const s = String(text);
 
-  // Try salary range first:
-  // e.g. "$170,000 - $250,000", "170k – 250k", "$170k to $250k USD", "£80,000—£95,000"
-  const rangeRe =
-    /(?:[\$£€]\s*)?(\d{2,3}(?:,\d{3})?)(\s*[kK])?\s*(?:-|–|—|to)\s*(?:[\$£€]\s*)?(\d{2,3}(?:,\d{3})?)(\s*[kK])?(?:\s*(USD|EUR|GBP))?/;
-  const rangeMatch = text.match(rangeRe);
-  if (rangeMatch) {
-    const [, loStr, loK, hiStr, hiK, code] = rangeMatch;
-    const lo = parseMoneyPart(loStr, loK);
-    const hi = parseMoneyPart(hiStr, hiK);
-    if (lo && hi) {
-      out.salary_min = lo;
-      out.salary_max = hi;
-      out.salary_mid = Math.round((lo + hi) / 2);
-      out.currency = code || detectCurrencySymbolOrCode(rangeMatch[0]);
-      out.salary_source = "text";
-      return out;
+  // "$170,000 - $250,000" (or "170,000 to 250,000")
+  const dollarsRange = /\$?\s?(\d{2,3}(?:,\d{3})?)\s*(?:-|–|to)\s*\$?\s?(\d{2,3}(?:,\d{3})?)/i;
+  // "170k - 250k"
+  const kRange = /(\d{2,3})\s*k\s*(?:-|–|to)\s*(\d{2,3})\s*k/i;
+  // Single-point "$19.30"
+  const singleDollar = /\$\s?(\d{1,3}(?:,\d{3})?(?:\.\d{1,2})?)/;
+
+  let loNum: number | null = null;
+  let hiNum: number | null = null;
+  let sawDollarSymbol = false;
+
+  const m1 = s.match(dollarsRange);
+  if (m1) {
+    loNum = parseFloat(m1[1].replace(/,/g, ""));
+    hiNum = parseFloat(m1[2].replace(/,/g, ""));
+    sawDollarSymbol = /\$/.test(m1[0]);
+  } else {
+    const m2 = s.match(kRange);
+    if (m2) {
+      const lo = parseFloat(m2[1]);
+      const hi = parseFloat(m2[2]);
+      if (!Number.isNaN(lo) && !Number.isNaN(hi)) {
+        loNum = lo * 1000;
+        hiNum = hi * 1000;
+      }
+    } else {
+      const m3 = s.match(singleDollar);
+      if (m3) {
+        const v = parseFloat(m3[1].replace(/,/g, ""));
+        if (Number.isFinite(v)) {
+          loNum = v;
+          hiNum = v;
+          sawDollarSymbol = true;
+        }
+      }
     }
   }
 
-  // Single-figure salary (treat as midpoint if clearly labeled as salary/comp):
-  // e.g. "base salary: $200,000" or "compensation: 220k USD"
-  const singleRe =
-    /(salary|base|compensation)\s*[:\-]?\s*(?:is\s*)?(?:[\$£€]\s*)?(\d{2,3}(?:,\d{3})?)(\s*[kK])?(?:\s*(USD|EUR|GBP))?/i;
-  const singleMatch = text.match(singleRe);
-  if (singleMatch) {
-    const [, , numStr, k, code] = singleMatch;
-    const mid = parseMoneyPart(numStr, k);
-    if (mid) {
-      out.salary_mid = mid;
-      out.currency = code || detectCurrencySymbolOrCode(singleMatch[0]);
-      out.salary_source = "text";
-    }
+  if (loNum == null || hiNum == null || Number.isNaN(loNum) || Number.isNaN(hiNum)) {
+    return features;
   }
 
-  // Best-effort employment type keywords
-  if (/full[\s-]?time/i.test(text)) out.employment_type = "Full-time";
-  else if (/part[\s-]?time/i.test(text)) out.employment_type = "Part-time";
-  else if (/contract/i.test(text)) out.employment_type = "Contract";
+  features.salary_min = loNum;
+  features.salary_max = hiNum;
+  if (sawDollarSymbol) features.currency = "USD";
+  features.salary_source = "text";
 
-  return out;
+  // Infer comp period heuristically if not obvious
+  const probe = loNum ?? hiNum;
+  if (probe != null) {
+    features.comp_period = probe <= 300 ? "hour" : "year";
+  }
+
+  finalizeSalary(features);
+  return features;
 }
 
-/**
- * Extract features from a JSON-LD JobPosting blob (if a site exposes it).
- * Returns an object; never mutates external state.
- */
-export function extractWebFeaturesFromJsonLd(jsonld: any): WebFeatures {
-  const out: WebFeatures = {};
-  if (!jsonld || typeof jsonld !== "object") return out;
+/* ------------------------------ Merge helper ----------------------------- */
 
-  // Title / org / location / employment type
-  if (typeof jsonld.title === "string") out.title = jsonld.title;
-  if (jsonld.hiringOrganization?.name) out.company_name = String(jsonld.hiringOrganization.name);
-  if (jsonld.employmentType) out.employment_type = String(jsonld.employmentType);
+const MERGE_KEYS = [
+  "salary_min",
+  "salary_mid",
+  "salary_max",
+  "currency",
+  "comp_period",
+  "salary_source",
+] as const satisfies readonly (keyof WebFeatures)[];
 
-  // Locations can be an object or array
-  const loc = Array.isArray(jsonld.jobLocation) ? jsonld.jobLocation[0] : jsonld.jobLocation;
-  if (loc?.address) {
-    const parts = [
-      loc.address.addressLocality,
-      loc.address.addressRegion,
-      loc.address.addressCountry,
-    ].filter(Boolean);
-    if (parts.length) out.location = parts.join(", ");
+// helper to keep TS happy per-key
+function setIfMissing<K extends keyof WebFeatures>(
+  target: WebFeatures,
+  source: WebFeatures,
+  key: K
+) {
+  if (target[key] == null && source[key] != null) {
+    // TS: source[key] is compatible with target[key] by construction
+    target[key] = source[key] as WebFeatures[K];
   }
+}
 
-  // Posted date
-  if (jsonld.datePosted) {
-    const d = new Date(jsonld.datePosted);
-    if (!isNaN(d.valueOf())) out.posted_at = d.toISOString();
-  }
-
-  // Salary (schema.org MonetaryAmount / MonetaryAmountDistribution variants)
-  const bs = jsonld.baseSalary;
-  if (bs && typeof bs === "object") {
-    const currency = bs.currency || bs?.value?.currency;
-    const unitText = bs?.value?.unitText;
-    const v = bs.value;
-
-    // QuantitativeValue: value, minValue, maxValue
-    const min = v?.minValue ?? v?.minvalue ?? undefined;
-    const max = v?.maxValue ?? v?.maxvalue ?? undefined;
-    const val = v?.value ?? v?.amount ?? undefined;
-
-    const num = (x: any) =>
-      typeof x === "number" ? x :
-      typeof x === "string" ? Number(x.replace(/,/g, "")) :
-      undefined;
-
-    const nMin = num(min);
-    const nMax = num(max);
-    const nVal = num(val);
-
-    if (nMin != null) out.salary_min = nMin;
-    if (nMax != null) out.salary_max = nMax;
-    if (nVal != null) out.salary_mid = nVal;
-
-    // If only min/max, compute midpoint
-    if (out.salary_min != null && out.salary_max != null && out.salary_mid == null) {
-      out.salary_mid = Math.round((out.salary_min + out.salary_max) / 2);
-    }
-
-    if (currency) out.currency = String(currency);
-    if (out.salary_min || out.salary_mid || out.salary_max) {
-      out.salary_source = "jsonld";
-    }
-  }
-
+export function mergeWebFeatures(a: WebFeatures, b: WebFeatures): WebFeatures {
+  // b fills gaps; a wins on conflicts
+  const out: WebFeatures = { ...a };
+  for (const k of MERGE_KEYS) setIfMissing(out, b, k);
   return out;
 }
