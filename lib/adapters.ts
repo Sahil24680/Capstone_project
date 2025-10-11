@@ -1,16 +1,18 @@
 // lib/adapters.ts
-// Central registry of ATS adapters
-// Import this rather than many adapters
 import { greenhouseAdapter } from "./adapters/greenhouse";
-import { webAdapter, buildWebJobKey } from "./adapters/web";
-import type { AdapterJob } from "./adapters/types";
+import { webAdapter } from "./adapters/web";
 
-export type AtsProvider = "greenhouse" | "web";
+type GreenhouseFn = (tenant_slug: string, external_job_id: string) => Promise<any>;
+type WebFn = (url: string) => Promise<any>;
 
-// Export the registry that testAdapter will consume
-export const adapters: Record<AtsProvider, (...args: any[]) => Promise<AdapterJob | null>> = {
+export type AdaptersRegistry = {
+  greenhouse?: GreenhouseFn;
+  web?: WebFn;
+};
+
+export const adapters: AdaptersRegistry = {
   greenhouse: greenhouseAdapter,
   web: webAdapter,
 };
 
-export { buildWebJobKey };
+export { greenhouseAdapter, webAdapter };

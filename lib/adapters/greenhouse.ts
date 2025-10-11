@@ -1,15 +1,62 @@
 // lib/adapters/greenhouse.ts
+import { z } from "zod";
 import type { AdapterJob } from "./types";
 import { fetchWithRetry, sha1Hex } from "./util";
 
 /** Some tenants put placeholder text in requisition_id. Normalize to null. */
-const isPlaceholderReqId = (v?: string | null) =>
-  !v || /^see opening id$/i.test(v) || /^n\/a$/i.test(v) || /^none$/i.test(v);
+const isPlaceholderReqId = (v?: string | null): boolean => {
+  if (!v) return true;
+  const s = v.trim().toLowerCase().replace(/[.:]+$/g, "");
 
-/**
- * Fetch a Greenhouse job detail and normalize to AdapterJob shape.
- * Includes fetch timing + content metrics for observability & dedupe.
- */
+  // Known placeholder patterns
+  const placeholders = [
+    "see opening id",
+    "see job id",
+    "see req id",
+    "n/a",
+    "na",
+    "none",
+    "null",
+    "tbd",
+    "not applicable"
+  ];
+
+  return placeholders.includes(s);
+};
+
+/** Zod schema for the GH payload (keep permissive). */
+const ZGHCurrency = z
+  .object({
+    unit: z.string().optional(),
+    amount: z.string(), // GH sends amounts as strings
+  })
+  .strict();
+
+const ZGHMetadataItem = z
+  .object({
+    id: z.number().optional(),
+    name: z.string().nullable().optional(),
+    value: z.union([ZGHCurrency, z.string(), z.null()]).optional(),
+    value_type: z.string().nullable().optional(),
+  })
+  .catchall(z.unknown());
+
+const ZGreenhouseJob = z
+  .object({
+    id: z.number(),
+    title: z.string().default(""),
+    company_name: z.string().default(""),
+    absolute_url: z.string().url().optional(),
+    first_published: z.string().nullable().optional(),
+    updated_at: z.string().nullable().optional(),
+    requisition_id: z.string().nullable().optional(),
+    location: z.object({ name: z.string().default("") }).partial().optional(),
+    content: z.string().nullable().optional(),
+    // allow null here; some tenants send `metadata: null`
+    metadata: z.array(ZGHMetadataItem).nullish().optional(),
+  })
+  .catchall(z.unknown());
+
 export async function greenhouseAdapter(
   tenant_slug: string,
   external_job_id: string
@@ -21,69 +68,72 @@ export async function greenhouseAdapter(
     url,
     {
       headers: {
-        // Helps with some edge CDN filters; keep it tame and identifiable
         "User-Agent": "jobbusters/0.1 (+https://example.com)",
         Accept: "application/json",
       },
     },
     {
-      retries: 2,          // small, polite retry
-      baseDelayMs: 300,    // backoff base
-      timeoutMs: 12_000,   // Sane ceiling
+      retries: 2,
+      baseDelayMs: 300,
+      timeoutMs: 12_000,
     }
   );
   const finished = new Date();
 
-  if (!res.ok) {
-    // Keep a consistent null contract on failures (caller can decide to log)
-    return null;
+  if (!res.ok) return null;
+
+  const payloadUnknown: unknown = await res.json();
+  const parsed = ZGreenhouseJob.safeParse(payloadUnknown);
+
+  // If parse fails, we still preserve raw_json, but be defensive pulling fields
+  const p = parsed.success ? parsed.data : ({} as z.infer<typeof ZGreenhouseJob>);
+
+  // Prefer parsed content; if that’s empty but raw payload has a string, use it.
+  let contentHtml =
+    typeof p.content === "string" ? p.content : "";
+
+  type MaybeHasContent = { content?: unknown };
+
+if (!contentHtml) {
+  const maybe = payloadUnknown as MaybeHasContent;
+  if (typeof maybe?.content === "string") {
+    contentHtml = maybe.content;
   }
+}
+  const buf = Buffer.from(contentHtml ?? "", "utf8");
 
-  const payload = await res.json();
-
-  const contentHtml = typeof payload.content === "string" ? payload.content : "";
-  const buf = Buffer.from(contentHtml, "utf8");
-
-  // Build the normal form
   const normalized: AdapterJob = {
     ats_provider: "greenhouse",
     tenant_slug,
-    external_job_id: String(payload.id ?? external_job_id),
+    external_job_id: String(p.id ?? external_job_id),
 
-    title: payload.title ?? "",
-    company_name: payload.company_name ?? tenant_slug,
-    location: payload.location?.name ?? "",
+    title: p.title ?? "",
+    company_name: p.company_name ?? tenant_slug,
+    location: p.location?.name ?? "",
     absolute_url:
-      payload.absolute_url ??
+      p.absolute_url ??
       `https://boards.greenhouse.io/${tenant_slug}/jobs/${external_job_id}`,
 
-    // GH often gives both; prefer first_published, fall back to updated_at
-    first_published: payload.first_published ?? payload.updated_at ?? null,
-    updated_at: payload.updated_at ?? finished.toISOString(),
+    first_published: p.first_published ?? p.updated_at ?? null,
+    updated_at: p.updated_at ?? finished.toISOString(),
 
-    requisition_id: isPlaceholderReqId(payload.requisition_id)
-      ? null
-      : (payload.requisition_id as string | null),
+    requisition_id: isPlaceholderReqId(p.requisition_id) ? null : (p.requisition_id ?? null),
 
-    // keep raw HTML so the NLP layer can do extraction later
     content: contentHtml || null,
 
     raw_json: {
-      // Keep the original GH payload for auditing & future features
-      ...payload,
+      ...(payloadUnknown as object),
 
-      // Provenance (for your pipeline’s “canonical candidate” checks)
       canonical_candidate: {
         ats: "greenhouse",
         tenant_slug,
-        external_job_id: String(payload.id ?? external_job_id),
+        external_job_id: String(p.id ?? external_job_id),
         absolute_url:
-          payload.absolute_url ??
+          p.absolute_url ??
           `https://boards.greenhouse.io/${tenant_slug}/jobs/${external_job_id}`,
-        provenance: "api", // came from GH API, not scraped HTML
+        provenance: "api",
       },
 
-      // Fetch diagnostics (helpful for debugging & SLOs)
       fetch: {
         status: res.status,
         ok: res.ok,
@@ -92,13 +142,11 @@ export async function greenhouseAdapter(
         elapsed_ms: Math.max(0, finished.getTime() - started.getTime()),
       },
 
-      // Content fingerprinting (dedupe, change detection, truncated bodies)
       content_metrics: {
-        length_bytes: buf.byteLength, // bytes of the HTML body
-        sha1: sha1Hex(buf),          // stable fingerprint
+        length_bytes: buf.byteLength,
+        sha1: sha1Hex(buf),
       },
 
-      // Downstream ingestion hint: this page still needs semantic enrichment
       _ingest: { needsnlp: true },
     },
   };
