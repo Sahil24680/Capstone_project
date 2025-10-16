@@ -22,6 +22,8 @@ const Auth_Form = ({
   sub_text,
   link,
 }: Authprops) => {
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -54,6 +56,10 @@ const Auth_Form = ({
         router.push("/"); //Redirect to home page
       } else {
         //Handle signup with server action
+        //Add first and last name to form data
+        formData.append('firstName', firstName.trim());
+        formData.append('lastName', lastName.trim());
+        
         const result = await signup(formData);
         
         if (result.error) {
@@ -235,6 +241,30 @@ const Auth_Form = ({
             {message && (
               <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg text-sm">
                 {message}
+              </div>
+            )}
+
+            {/* First and last name fields (only show for sign up page) */}
+            {!is_login && (
+              <div className="grid grid-cols-2 gap-4">
+                <Input
+                  name="firstName"
+                  type="text"
+                  placeholder="First Name"
+                  value={firstName}
+                  onChange={(e) => setFirstName(e.target.value)}
+                  required
+                  disabled={loading}
+                />
+                <Input
+                  name="lastName"
+                  type="text"
+                  placeholder="Last Name"
+                  value={lastName}
+                  onChange={(e) => setLastName(e.target.value)}
+                  required
+                  disabled={loading}
+                />
               </div>
             )}
 
