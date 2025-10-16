@@ -1,5 +1,5 @@
 "use server";
-import { createClient } from "./client";
+import { createClient } from "./server";
 import { redirect } from "next/navigation";
 
 export async function login(formData: FormData) {
@@ -17,13 +17,14 @@ export async function signup(formData: FormData) {
   const password = formData.get("password") as string;
 
   const { error } = await supabase.auth.signUp({ email, password });
+  //redirect("/auth/login"); //?delete this comment later
   return error ? { error } : { success: true };
 }
 
 export async function logout() {
   const supabase = await createClient();
   const { error } = await supabase.auth.signOut();
-  redirect("/auth/login");
+  return error ? { error } : { success: true };
 }
 
 export async function updatePassword(newPassword: string) {

@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { createClient } from "@/utils/supabase/client";
 import { User } from "@supabase/supabase-js";
+import { logout } from "@/utils/supabase/action";
 
 import {
   ChevronDown,
@@ -74,8 +75,18 @@ const Index = () => {
   };
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
-    setUser(null);
+    try {
+      const result = await logout();
+      if (result.error) {
+        console.error('Logout error:', result.error);
+      } else {
+        setUser(null);
+        //Optional redirect to login page
+        //router.push("/auth/login");
+      }
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
   };
 
   // Check user authentication status

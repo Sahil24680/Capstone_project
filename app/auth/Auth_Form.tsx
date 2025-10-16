@@ -4,6 +4,7 @@ import { Input } from "@/app/components/ui/Input";
 import { createClient } from "@/utils/supabase/client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { login, signup } from "@/utils/supabase/action";
 
 interface Authprops {
   title: string;
@@ -37,25 +38,27 @@ const Auth_Form = ({
     setMessage("");
 
     try {
-      if (is_login) {
-        //Handle login
-        const {error} = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
+      const formData = new FormData();
+      formData.append('email', email);
+      formData.append('password', password);
 
-        if (error) throw error;
+      if (is_login) {
+        //Handle login with server action
+        const result = await login(formData);
+        
+        if (result.error) {
+          throw new Error(result.error.message);
+        }
 
         setMessage("Login successful! Redirecting...");
         router.push("/"); //Redirect to home page
       } else {
-        //Handle signup
-        const {error} = await supabase.auth.signUp({
-          email,
-          password,
-        });
-
-        if (error) throw error;
+        //Handle signup with server action
+        const result = await signup(formData);
+        
+        if (result.error) {
+          throw new Error(result.error.message);
+        }
 
         setMessage("Check your email for the confirmation link!");
       }
