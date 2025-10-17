@@ -30,6 +30,7 @@ const Auth_Form = ({
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [showPasswordReset, setShowPasswordReset] = useState(false);
+  const [otpLoading, setOtpLoading] = useState(false);
   const router = useRouter();
   const supabase = createClient();
 
@@ -144,6 +145,42 @@ const Auth_Form = ({
       setError(error.message || "An error occurred sending password reset email");
     } finally {
       setLoading(false);
+    }
+  };
+
+
+  //OTP for login
+  const handleOTPAuth = async () => {
+    //validate email
+    if (!email.trim()) {
+      setError("Please enter your email address");
+      return;
+    }
+
+    setOtpLoading(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/otp`,
+          shouldCreateUser: false, //don't create new users (login only)
+        }
+      });
+
+      if (error) throw error;
+
+      //store email in sessionStorage for OTP page
+      sessionStorage.setItem('otp_email', email);
+      
+      //redirect to OTP verification page
+      router.push('/auth/otp');
+    } catch (error: any) {
+      setError(error.message || "An error occurred sending OTP code");
+    } finally {
+      setOtpLoading(false);
     }
   };
 
@@ -272,7 +309,7 @@ const Auth_Form = ({
             <Input
               name="email"
               type="email"
-              placeholder="email address"
+              placeholder="Email address"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               leftIcon={<Mail className="h-5 w-5 text-slate-400" />}
@@ -344,6 +381,20 @@ const Auth_Form = ({
               <img src="/images/github_icon.png" alt="GitHub" className="w-5 h-5"/>
               {loading ? "Loading..." : `Continue with GitHub`}
             </Button>
+
+            {/* OTP button only show on login page */}
+            {is_login && (
+              <Button
+                type="button"
+                onClick={handleOTPAuth}
+                fullWidth
+                className="py-3 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 flex items-center justify-center gap-3"
+                disabled={otpLoading || loading}
+              >
+                <Mail className="w-5 h-5 text-slate-700"/>
+                {otpLoading ? "Sending code..." : `Continue with OTP`}
+              </Button>
+            )}
           </form>
         </div>
       </div>
