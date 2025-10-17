@@ -1,10 +1,6 @@
 import { Mail, Lock, Apple } from "lucide-react";
 import { Button } from "@/app/components/ui/Button";
 import { Input } from "@/app/components/ui/Input";
-import { createClient } from "@/utils/supabase/client";
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { login, signup } from "@/utils/supabase/action";
 
 interface Authprops {
   title: string;
@@ -14,7 +10,6 @@ interface Authprops {
   link: string;
 }
 
-
 const Auth_Form = ({
   title,
   button_txt,
@@ -22,170 +17,6 @@ const Auth_Form = ({
   sub_text,
   link,
 }: Authprops) => {
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
-  const [showPasswordReset, setShowPasswordReset] = useState(false);
-  const [otpLoading, setOtpLoading] = useState(false);
-  const router = useRouter();
-  const supabase = createClient();
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError("");
-    setMessage("");
-
-    try {
-      const formData = new FormData();
-      formData.append('email', email);
-      formData.append('password', password);
-
-      if (is_login) {
-        //Handle login with server action
-        const result = await login(formData);
-        
-        if (result.error) {
-          throw new Error(result.error.message);
-        }
-
-        setMessage("Login successful! Redirecting...");
-        router.push("/"); //Redirect to home page
-      } else {
-        //Handle signup with server action
-        //Add first and last name to form data
-        formData.append('firstName', firstName.trim());
-        formData.append('lastName', lastName.trim());
-        
-        const result = await signup(formData);
-        
-        if (result.error) {
-          throw new Error(result.error.message);
-        }
-
-        setMessage("Check your email for the confirmation link!");
-      }
-    } catch (error: any) {
-      setError(error.message || "An error occurred");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-
-  //Google sign in
-  const handleGoogleAuth = async () => {
-    setLoading(true);
-    setError("");
-    setMessage("");
-
-    try {
-      const {error} = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: `${window.location.origin}/`
-        }
-      });
-
-      if (error) throw error;
-    } catch (error: any) {
-      setError(error.message || "An error occurred with Google authentication");
-      setLoading(false);
-    }
-  };
-
-
-  //GitHub sign in
-  const handleGitHubAuth = async () => {
-    setLoading(true);
-    setError("");
-    setMessage("");
-
-    try {
-      const {error} = await supabase.auth.signInWithOAuth({
-        provider: 'github',
-        options: {
-          redirectTo: `${window.location.origin}/`
-        }
-      });
-
-      if (error) throw error;
-    } catch (error: any) {
-      setError(error.message || "An error occurred with GitHub authentication");
-      setLoading(false);
-    }
-  };
-
-
-  //Password reset
-  const handlePasswordReset = async () => {
-    if (!email.trim()) {
-      setError("Please enter your email address first");
-      return;
-    }
-
-    setLoading(true);
-    setError("");
-    setMessage("");
-
-    try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/auth/reset-password`,
-      });
-
-      if (error) throw error;
-
-      setMessage("Password reset email sent! Check your inbox.");
-      setShowPasswordReset(false);
-    } catch (error: any) {
-      setError(error.message || "An error occurred sending password reset email");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-
-  //OTP for login
-  const handleOTPAuth = async () => {
-    //validate email
-    if (!email.trim()) {
-      setError("Please enter your email address");
-      return;
-    }
-
-    setOtpLoading(true);
-    setError("");
-    setMessage("");
-
-    try {
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: {
-          emailRedirectTo: `${window.location.origin}/auth/otp`,
-          shouldCreateUser: false, //don't create new users (login only)
-        }
-      });
-
-      if (error) throw error;
-
-      //store email in sessionStorage for OTP page
-      sessionStorage.setItem('otp_email', email);
-      
-      //redirect to OTP verification page
-      router.push('/auth/otp');
-    } catch (error: any) {
-      setError(error.message || "An error occurred sending OTP code");
-    } finally {
-      setOtpLoading(false);
-    }
-  };
-
-
-
   return (
     <div className="min-h-screen bg-white flex items-center justify-center font-inter relative">
       {/* Background tech elements */}
@@ -265,56 +96,15 @@ const Auth_Form = ({
             </p>
           </div>
 
-          {/* Auth form */}
-          <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Error message */}
-            {error && (
-              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
-                {error}
-              </div>
-            )}
-
-            {/* Success message */}
-            {message && (
-              <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg text-sm">
-                {message}
-              </div>
-            )}
-
-            {/* First and last name fields (only show for sign up page) */}
-            {!is_login && (
-              <div className="grid grid-cols-2 gap-4">
-                <Input
-                  name="firstName"
-                  type="text"
-                  placeholder="First Name"
-                  value={firstName}
-                  onChange={(e) => setFirstName(e.target.value)}
-                  required
-                  disabled={loading}
-                />
-                <Input
-                  name="lastName"
-                  type="text"
-                  placeholder="Last Name"
-                  value={lastName}
-                  onChange={(e) => setLastName(e.target.value)}
-                  required
-                  disabled={loading}
-                />
-              </div>
-            )}
-
+          {/* Login form */}
+          <form className="space-y-6">
             {/* Email field */}
             <Input
               name="email"
               type="email"
-              placeholder="Email address"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              placeholder="email address"
               leftIcon={<Mail className="h-5 w-5 text-slate-400" />}
               required
-              disabled={loading}
             />
 
             {/* Password field */}
@@ -323,78 +113,25 @@ const Auth_Form = ({
                 name="password"
                 type="password"
                 placeholder="Password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
                 leftIcon={<Lock className="h-5 w-5 text-slate-400" />}
                 required
-                disabled={loading}
               />
               {is_login && (
                 <div className="flex justify-end mt-2">
-                  <button
-                    type="button"
-                    onClick={handlePasswordReset}
-                    disabled={loading}
-                    className="text-orange-600 hover:text-orange-500 text-sm transition-colors font-medium disabled:opacity-50"
+                  <a
+                    href="#"
+                    className="text-orange-600 hover:text-orange-500 text-sm transition-colors font-medium"
                   >
                     Forgot password?
-                  </button>
+                  </a>
                 </div>
               )}
             </div>
 
-            {/* Submit button */}
-            <Button type="submit" fullWidth className="py-3" disabled={loading}>
-              {loading ? "Loading..." : button_txt}
+            {/* Login button */}
+            <Button type="submit" fullWidth className="py-3">
+              {button_txt}
             </Button>
-
-            {/* Divider */}
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-slate-300"></div>
-              </div>
-              <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-white text-slate-500">Or continue with</span>
-              </div>
-            </div>
-
-            {/* Google sign in button */}
-            <Button
-              type="button"
-              onClick={handleGoogleAuth}
-              fullWidth
-              className="py-3 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 flex items-center justify-center gap-3"
-              disabled={loading}
-            >
-              <img src="/images/google_icon.png" alt="Google" className="w-5 h-5"/>
-              {loading ? "Loading..." : `Continue with Google`}
-            </Button>
-
-            {/* GitHub sign in button */}
-            <Button
-              type="button"
-              onClick={handleGitHubAuth}
-              fullWidth
-              className="py-3 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 flex items-center justify-center gap-3"
-              disabled={loading}
-            >
-              <img src="/images/github_icon.png" alt="GitHub" className="w-5 h-5"/>
-              {loading ? "Loading..." : `Continue with GitHub`}
-            </Button>
-
-            {/* OTP button only show on login page */}
-            {is_login && (
-              <Button
-                type="button"
-                onClick={handleOTPAuth}
-                fullWidth
-                className="py-3 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 flex items-center justify-center gap-3"
-                disabled={otpLoading || loading}
-              >
-                <Mail className="w-5 h-5 text-slate-700"/>
-                {otpLoading ? "Sending code..." : `Continue with OTP`}
-              </Button>
-            )}
           </form>
         </div>
       </div>

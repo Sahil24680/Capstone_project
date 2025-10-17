@@ -37,22 +37,14 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
 
-  //only protect specific routes that require authentication
-  //allow public access to homepage, auth pages, etc.
-  const protectedRoutes = ['/dashboard'] //for the future development
-  const isProtectedRoute = protectedRoutes.some(route => 
-    request.nextUrl.pathname.startsWith(route)
-  )
-  
-  
   if (
-    !user && 
+    !user &&
     !request.nextUrl.pathname.startsWith('/login') &&
-    isProtectedRoute &&
-    !request.nextUrl.pathname.startsWith('/auth') &&
+    !request.nextUrl.pathname.startsWith('/auth')&&
     !request.nextUrl.pathname.startsWith('/home')
+    
   ) {
-    //no user trying to access protected route, redirect to login
+    // no user, potentially respond by redirecting the user to the login page
     const url = request.nextUrl.clone()
     url.pathname = '/auth/login'
     return NextResponse.redirect(url)
