@@ -1,5 +1,5 @@
 "use server";
-import { createClient } from "./server";
+import { createClient } from "./client";
 import { redirect } from "next/navigation";
 
 export async function login(formData: FormData) {
@@ -15,30 +15,15 @@ export async function signup(formData: FormData) {
   const supabase = await createClient();
   const email = formData.get("email") as string;
   const password = formData.get("password") as string;
-  const firstName = formData.get("firstName") as string; 
-  const lastName = formData.get("lastName") as string;
 
-  // Create display name from first and last name
-  const displayName = `${firstName} ${lastName}`;
-
-  const { error } = await supabase.auth.signUp({ 
-    email, 
-    password,
-    options: {
-      data: {
-        first_name: firstName,
-        last_name: lastName,
-        display_name: displayName,
-      }
-    }
-  });
+  const { error } = await supabase.auth.signUp({ email, password });
   return error ? { error } : { success: true };
 }
 
 export async function logout() {
   const supabase = await createClient();
   const { error } = await supabase.auth.signOut();
-  return error ? { error } : { success: true };
+  redirect("/auth/login");
 }
 
 export async function updatePassword(newPassword: string) {

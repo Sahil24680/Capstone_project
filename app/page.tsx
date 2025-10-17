@@ -1,10 +1,6 @@
 "use client";
 import GlobalStyles from "@/app/components/GlobalStyles";
 import React, { useState, useEffect, useRef } from "react";
-import Link from "next/link";
-import { createClient } from "@/utils/supabase/client";
-import { User } from "@supabase/supabase-js";
-import { logout } from "@/utils/supabase/action";
 
 import {
   ChevronDown,
@@ -33,10 +29,7 @@ const Index = () => {
     new Set()
   );
   const [currentScore, setCurrentScore] = useState(0);
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
   const observerRef = useRef<IntersectionObserver | null>(null);
-  const supabase = createClient();
 
   const handleAnalyze = async () => {
     if (!jobText.trim()) return;
@@ -74,42 +67,6 @@ const Index = () => {
     setCurrentScore(0);
   };
 
-  const handleLogout = async () => {
-    try {
-      const result = await logout();
-      if (result.error) {
-        console.error('Logout error:', result.error);
-      } else {
-        setUser(null);
-        //Optional redirect to login page
-        //router.push("/auth/login");
-      }
-    } catch (error) {
-      console.error('Logout error:', error);
-    }
-  };
-
-  // Check user authentication status
-  useEffect(() => {
-    const getUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      setUser(user);
-      setLoading(false);
-    };
-
-    getUser();
-
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        setUser(session?.user ?? null);
-        setLoading(false);
-      }
-    );
-
-    return () => subscription.unsubscribe();
-  }, [supabase.auth]);
-
   // Intersection Observer for animations
   useEffect(() => {
     observerRef.current = new IntersectionObserver(
@@ -141,7 +98,7 @@ const Index = () => {
               </div>
 
               {/* Desktop Menu */}
-              <div className="hidden md:flex space-x-8 items-center">
+              <div className="hidden md:flex space-x-8">
                 <a
                   href="#how-it-works"
                   className="text-slate-600 hover:text-slate-900 transition-colors"
@@ -160,32 +117,9 @@ const Index = () => {
                 >
                   FAQ
                 </a>
-                
-                {loading ? (
-                  <div className="text-slate-600">Loading...</div>
-                ) : user ? (
-                  <button
-                    onClick={handleLogout}
-                    className="btn-brand px-4 py-2 rounded-lg font-medium"
-                  >
-                    Logout
-                  </button>
-                ) : (
-                  <>
-                    <Link
-                      href="/auth/login"
-                      className="text-slate-600 hover:text-slate-900 transition-colors"
-                    >
-                      Login
-                    </Link>
-                    <Link
-                      href="/auth/signup"
-                      className="btn-brand px-4 py-2 rounded-lg font-medium"
-                    >
-                      Sign Up
-                    </Link>
-                  </>
-                )}
+                <button className="btn-brand px-4 py-2 rounded-lg font-medium">
+                  Open Prototype
+                </button>
               </div>
 
               {/* Mobile Menu Button */}
@@ -223,32 +157,9 @@ const Index = () => {
                   >
                     FAQ
                   </a>
-                  
-                  {loading ? (
-                    <div className="text-slate-600">Loading...</div>
-                  ) : user ? (
-                    <button
-                      onClick={handleLogout}
-                      className="btn-brand px-4 py-2 rounded-lg font-medium text-left"
-                    >
-                      Logout
-                    </button>
-                  ) : (
-                    <>
-                      <Link
-                        href="/auth/login"
-                        className="text-slate-600 hover:text-slate-900 transition-colors"
-                      >
-                        Login
-                      </Link>
-                      <Link
-                        href="/auth/signup"
-                        className="btn-brand px-4 py-2 rounded-lg font-medium text-left"
-                      >
-                        Sign Up
-                      </Link>
-                    </>
-                  )}
+                  <button className="btn-brand px-4 py-2 rounded-lg font-medium text-left">
+                    Open Prototype
+                  </button>
                 </div>
               </div>
             )}
