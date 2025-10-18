@@ -24,20 +24,23 @@ const Auth_Form = ({
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-  
+
     const formData = new FormData(e.currentTarget);
     const result = is_login ? await login(formData) : await signup(formData);
-  
+
     if ("error" in result && result.error) {
-      toast.error("Invalid credentials"); 
+      toast.error("Invalid credentials");
       return;
     }
-  
-    toast.success(is_login ? "Logged in!" : "Account created!");
+
+    toast.success(
+      is_login ? "Logged in!" : "Account created! Check email for coformation and close this window"
+    );
     // if its signup page it will auto redirect to login page via middleware so the following line is fine.
-    router.push("/job-buster");
+    if (is_login) {
+      router.push("/job-buster");
+    }
   }
-  
 
   return (
     <div className="min-h-screen bg-white flex items-center justify-center font-inter relative">
