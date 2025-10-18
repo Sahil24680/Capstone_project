@@ -1,6 +1,9 @@
 import { Mail, Lock, Apple } from "lucide-react";
 import { Button } from "@/app/components/ui/Button";
 import { Input } from "@/app/components/ui/Input";
+import { login, signup } from "@/utils/supabase/action";
+import { toast } from "react-toastify";
+import { useRouter } from "next/navigation";
 
 interface Authprops {
   title: string;
@@ -17,6 +20,25 @@ const Auth_Form = ({
   sub_text,
   link,
 }: Authprops) => {
+  const router = useRouter();
+
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+  
+    const formData = new FormData(e.currentTarget);
+    const result = is_login ? await login(formData) : await signup(formData);
+  
+    if ("error" in result && result.error) {
+      toast.error("Invalid credentials"); 
+      return;
+    }
+  
+    toast.success(is_login ? "Logged in!" : "Account created!");
+    // if its signup page it will auto redirect to login page via middleware so the following line is fine.
+    router.push("/job-buster");
+  }
+  
+
   return (
     <div className="min-h-screen bg-white flex items-center justify-center font-inter relative">
       {/* Background tech elements */}
@@ -97,7 +119,7 @@ const Auth_Form = ({
           </div>
 
           {/* Login form */}
-          <form className="space-y-6">
+          <form onSubmit={handleSubmit} className="space-y-6">
             {/* Email field */}
             <Input
               name="email"

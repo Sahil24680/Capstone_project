@@ -1,5 +1,5 @@
 "use server";
-import { createClient } from "./client";
+import { createClient } from "./server";
 import { redirect } from "next/navigation";
 
 export async function login(formData: FormData) {
