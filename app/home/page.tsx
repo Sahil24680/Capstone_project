@@ -1,7 +1,7 @@
 "use client";
 import GlobalStyles from "@/app/components/GlobalStyles";
 import React, { useState, useEffect, useRef } from "react";
-
+import { useRouter } from "next/navigation";
 import {
   ChevronDown,
   Menu,
@@ -28,6 +28,7 @@ const Index = () => {
   const [visibleElements, setVisibleElements] = useState<Set<string>>(
     new Set()
   );
+  const router = useRouter();
   const [currentScore, setCurrentScore] = useState(0);
   const observerRef = useRef<IntersectionObserver | null>(null);
 
@@ -117,8 +118,11 @@ const Index = () => {
                 >
                   FAQ
                 </a>
-                <button className="btn-brand px-4 py-2 rounded-lg font-medium">
-                  Open Prototype
+                <button
+                  onClick={() => router.push("/auth/login")}
+                  className="px-5 py-2 bg-orange-600 text-white rounded-lg font-semibold hover:bg-orange-700 transition-colors"
+                >
+                  Get Your Score Now
                 </button>
               </div>
 
