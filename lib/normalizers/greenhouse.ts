@@ -198,69 +198,185 @@ export function extractGhFeaturesFromMetadata(raw: unknown): GHCanon {
 }
 
 /** Text fallback: only fills fields that metadata didn’t already populate. */
+/**
+ * Extracts salary information from job posting text if not already populated by metadata.
+ * It searches for ranges (e.g., "$100k - $150k") or single amounts (e.g., "$25/hr").
+ *
+ * @param text The job description text to analyze.
+ * @param features The object to populate with extracted salary features.
+ */
 export function extractSalaryFromText(text: string, features: GHCanon) {
   if (!text) return;
 
   const s = String(text);
+  const lower = s.toLowerCase();
 
-  // 1) "$170,000 - $250,000" (or "170,000 to 250,000")
-  const dollarsRange = /\$?\s?(\d{2,3}(?:,\d{3})?)\s*(?:-|–|to)\s*\$?\s?(\d{2,3}(?:,\d{3})?)/i;
-  // 2) "170k - 250k"
-  const kRange = /(\d{2,3})\s*k\s*(?:-|–|to)\s*(\d{2,3})\s*k/i;
-  // 3) single-point "$19.30" used for hourly roles
+  // --- Contextual Indicators ---
+  // Hourly indicators
+  const isHourly = /\b(hourly|per\s*hour|\/\s*(?:hr|hour)|\bhrly\b)\b/i.test(lower);
+  // Yearly indicators
+  const isYearly = /\b(annual|per\s*year|per\s*yr|\/\s*yr|\/\s*year|salary|wage)\b/i.test(lower);
+  // Currency keyword
+  const usdKeyword = /\b(?:u\.?s\.?\s*\$|usd|us\s*dollars)\b/i;
+
+  // --- Regex Definitions (Updated to be more robust) ---
+  // 1a) Dollar range: "$170,000 - $250,000.50"
+  const dollarsRange = /(?=.*\$)\s*\$?\s?(\d{2,3}(?:,\d{3})?(?:\.\d{1,2})?)\s*(?:-|–|to)\s*\$?\s?(\d{2,3}(?:,\d{3})?(?:\.\d{1,2})?)/i;
+  // 1b) K-range: "170k - 250k" (Allows decimals like 170.5k)
+  const kRange = /(\d{1,3}(?:\.\d+)?)\s*k\s*(?:-|–|to)\s*(\d{1,3}(?:\.\d+)?)\s*k/i;
+  // 2) Single K: "40k", "$40k", "100.5K"
+  const kSingle = /\$?\s*(\d{1,4}(?:\.\d+)?)\s*[kK]\b/;
+  // 3) Single Dollar: "$19.30" or "$150,000"
   const singleDollar = /\$\s?(\d{1,3}(?:,\d{3})?(?:\.\d{1,2})?)/;
-
+  
   let loNum: number | null = null;
   let hiNum: number | null = null;
   let sawDollarSymbol = false;
+  let isKScaled = false; // Tracks if the value was followed by 'k' and multiplied by 1000
+  let matchedPeriod: 'hour' | 'year' | null = null; // Period determined by the match context
 
+  // --- Matching Cascade: Ranges (Dollars/K) -> Single K -> Single Dollar ---
+
+  // 1. Match Dollar Range (e.g., "$170,000 - $250,000")
   const m1 = s.match(dollarsRange);
   if (m1) {
     loNum = parseFloat(m1[1].replace(/,/g, ""));
     hiNum = parseFloat(m1[2].replace(/,/g, ""));
     sawDollarSymbol = /\$/.test(m1[0]);
-  } else {
+
+    // If numbers are small (e.g., "70 - 90") and not followed by 'k', assume yearly K and scale
+    if (Math.max(loNum, hiNum) < 1000 && Math.max(loNum, hiNum) > 10 && !(/\bk\b/i).test(m1[0])) {
+      loNum *= 1000;
+      hiNum *= 1000;
+      isKScaled = true;
+    }
+  } 
+  
+  // 2. Match K-Range (e.g., "170k to 250k")
+  if (loNum === null) {
     const m2 = s.match(kRange);
     if (m2) {
       const lo = parseFloat(m2[1]);
       const hi = parseFloat(m2[2]);
-      if (!Number.isNaN(lo) && !Number.isNaN(hi)) {
+      if (Number.isFinite(lo) && Number.isFinite(hi)) {
         loNum = lo * 1000;
         hiNum = hi * 1000;
-      }
-    } else {
-      const m3 = s.match(singleDollar);
-      if (m3) {
-        const v = parseFloat(m3[1].replace(/,/g, ""));
-        if (Number.isFinite(v)) {
-          loNum = v;
-          hiNum = v;
-          sawDollarSymbol = true;
-        }
+        isKScaled = true;
+        sawDollarSymbol = /\$/.test(m2[0]);
       }
     }
   }
 
+  // 3. Match Single K (e.g., "$40k")
+  if (loNum === null) { 
+    const mK = s.match(kSingle);
+    if (mK) {
+      const v = parseFloat(mK[1]);
+      if (Number.isFinite(v)) {
+        loNum = v * 1000;
+        hiNum = v * 1000;
+        isKScaled = true;
+        sawDollarSymbol = /\$/.test(mK[0]);
+      }
+    }
+  }
+
+  // 4. Match Single Dollar (e.g., "$19.30" or "$150,000")
+  if (loNum === null) {
+    const m3 = s.match(singleDollar);
+    if (m3) {
+      const v = parseFloat(m3[1].replace(/,/g, ""));
+      if (Number.isFinite(v)) {
+        const looksHourly = isHourly && v < 1000; // e.g. $15.50/hr
+        const looksYearly = isYearly && v >= 10000; // e.g. $150,000 annual
+
+        if (looksHourly) {
+            matchedPeriod = 'hour';
+        } else if (looksYearly) {
+            matchedPeriod = 'year';
+        } else {
+            return; // Ignore stray dollar amounts (like "$5" for a fee)
+        }
+
+        // CRITICAL FIX: Do NOT multiply v by 1000 here.
+        // The value 'v' is already the correct absolute amount.
+        loNum = v;
+        hiNum = v;
+        sawDollarSymbol = true;
+      }
+    }
+  }
+
+  // --- Final Validation & Period Inference ---
   if (loNum == null || hiNum == null || Number.isNaN(loNum) || Number.isNaN(hiNum)) {
     return; // nothing to set
   }
+  
+  // A K-scaled match almost always implies a yearly salary
+  if (isKScaled && !matchedPeriod) {
+      matchedPeriod = 'year';
+  }
+
+  // Apply sanity checks for unmatched periods
+  if (!matchedPeriod) {
+      const max = Math.max(loNum, hiNum);
+      if (isHourly && max <= 1000) {
+           matchedPeriod = 'hour';
+      } else if (isYearly && max >= 10000) {
+           matchedPeriod = 'year';
+      } else if (max < 1000) {
+          // If a small number is found without explicit hourly cue, ignore it.
+           return;
+      } else {
+          // Default large numbers (not caught by K-scaling) to yearly if no other cues are present
+          matchedPeriod = 'year';
+      }
+  }
+  
+  // If the inferred period is 'year', but the number is suspiciously small (<10000), ignore 
+  if (matchedPeriod === 'year' && Math.min(loNum, hiNum) < 10000) {
+      return;
+  }
+  
+  // --- Apply Changes to Features Object ---
+
+  const foundRange = loNum !== hiNum;
+  const hadMetadataMinMax =
+    features.salary_source === "metadata" ||
+    features.salary_min != null ||
+    features.salary_max != null;
 
   let changed = false;
+
+  // Set min salary (only if not already set)
   if (features.salary_min == null) {
     features.salary_min = loNum;
     changed = true;
   }
-  if (features.salary_max == null) {
+
+  // Set max salary (only if not already set AND a range was found)
+  if (foundRange && features.salary_max == null) {
     features.salary_max = hiNum;
     changed = true;
   }
-  if (!features.currency && sawDollarSymbol) {
+
+  // Currency inference:
+  if (!features.currency && (sawDollarSymbol || usdKeyword.test(s))) {
     features.currency = "USD";
     changed = true;
   }
 
-  if (changed && features.salary_source !== "metadata") {
+  // Comp period inference:
+  if (!features.comp_period && matchedPeriod) {
+    features.comp_period = matchedPeriod;
+    changed = true;
+  }
+
+  // Source tagging:
+  // Only mark "text" if we actually changed something AND metadata didn't already fill min/max
+  if (changed && features.salary_source !== "metadata" && !hadMetadataMinMax) {
     features.salary_source = "text";
   }
+
   finalizeSalary(features);
 }
