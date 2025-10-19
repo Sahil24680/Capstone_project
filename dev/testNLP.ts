@@ -1,6 +1,6 @@
 // dev/testNLP.ts
 
-import { scoreItems } from "../lib/nlp/schema";
+import { scoreItems } from "../lib/scoring/nlp";
 
 (async () => {
   try{
