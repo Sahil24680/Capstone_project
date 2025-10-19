@@ -1,7 +1,7 @@
 // lib/db/jobFeatures.ts
 
 // Upsert job features from NLP to the database 
-import { createClient } from "@/utils/supabase/client";
+//import { createClient } from "@/utils/supabase/client";
 
 export type dbJobFeatures = {
   time_type: string | null;
@@ -36,13 +36,14 @@ export function updateJobFeatures(x: Partial<dbJobFeatures>): Partial<dbJobFeatu
 
 
 
-// Should it be insert instead? because upsert implies an update while insertion is first time? ask team
+
+/*
 // Strict insert: fill all unspecified fields with nulls.
 // Use this only when you're creating a brand new row.//
 //export const upsertJobFeatures = async (jobId: string, features: any) => {
   // call supabase 
   //insert corresponding fields into database 
-/** Writes to Supabase */
+// Writes to Supabase 
 export async function upsertJobFeatures(jobId: string, features: Partial<dbJobFeatures>) {
   const supabase = await createClient();
 
@@ -65,7 +66,7 @@ export async function upsertJobFeatures(jobId: string, features: Partial<dbJobFe
     return error ? { error } : { success: true, data };
   }
 
-  // UPDATE
+  // 
   const updateSet = updateJobFeatures(features);
   if (!Object.keys(updateSet).length) return { success: true, data: existing };
   const { data, error } = await supabase
@@ -76,3 +77,4 @@ export async function upsertJobFeatures(jobId: string, features: Partial<dbJobFe
     .single();
   return error ? { error } : { success: true, data };
 }
+*/
