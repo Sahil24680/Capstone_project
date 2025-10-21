@@ -2,14 +2,14 @@
 import { z } from "zod";
 
 export type GHCanon = {
-  time_type?: string | null;
-  salary_min?: number | null;
-  salary_mid?: number | null;
-  salary_max?: number | null;
-  currency?: string | null;
-  department?: string | null;
-  salary_source?: "metadata" | "text" | null;
-  comp_period?: "hour" | "year" | null;
+  time_type?: string;
+  salary_min?: number;
+  salary_mid?: number;
+  salary_max?: number;
+  currency?: string;
+  department?: string;
+  salary_source?: "metadata" | "text";
+  comp_period?: "hour" | "year";
 };
 
 /** Zod guard for GH metadata array (kept permissive). */
@@ -47,20 +47,12 @@ function asMetadataArray(raw: unknown): Array<z.infer<typeof ZGHMetadataItem>> {
   return [];
 }
 
-export function finalizeSalary(features: GHCanon) {
+function finalizeSalary(features: GHCanon) {
   const has = (n: unknown) => typeof n === "number" && Number.isFinite(n);
 
   let min = features.salary_min;
   let mid = features.salary_mid;
   let max = features.salary_max;
-
-    // --- NEW LOGIC ADDED HERE TO CORRECT MISASSIGNED MAX/MID ---
-    // If we have a Min, a Mid, but NO Max, and Mid > Min, Mid is likely the Max.
-    if (has(min) && has(mid) && !has(max) && (mid as number) > (min as number)) {
-        max = mid; 
-        mid = undefined; // Clear midpoint to recalculate later
-        features.salary_mid = undefined;
-    }
 
   // Keep ordering sane if both provided
   if (has(min) && has(max) && (min as number) > (max as number)) {
@@ -130,7 +122,7 @@ export function htmlToPlainText(html: string): string {
  *   - Use only base salary labels (ignore OTE/on-target and any equity/RSU).
  *   - Do not invent a max from a mid.
  *   - If only min exists, leave max unset.
- *   - Heuristic for comp period: <= 300 → "hour", otherwise "year".        
+ *   - Heuristic for comp period: <= 300 → "hour", otherwise "year".
  */
 export function extractGhFeaturesFromMetadata(raw: unknown): GHCanon {
   const features: GHCanon = {};
@@ -186,8 +178,6 @@ export function extractGhFeaturesFromMetadata(raw: unknown): GHCanon {
         setCurrencyAmt("salary_mid", m.value, label);
       }
     }
-
-    
 
     // Time type
     if (name === "Time Type" && typeof m.value === "string") {
