@@ -112,11 +112,9 @@ export async function analyzeAdapterJob(job: AdapterJob): Promise<Combined> {
         delete f2.salary_min;
         delete f2.salary_max;
         delete f2.salary_mid;
-        delete f2.salary_source;
     }
     }
     
-
     features = f2;
 
     // 3) LLM Schema with fields

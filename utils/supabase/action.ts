@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import type { AdapterJob } from "@/lib/adapters/types";   
 import type { dbJobFeatures } from "@/lib/db/jobFeatures.ts";   
 import {analyzeAdapterJob} from "@/lib/nlp/client";
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 export async function login(formData: FormData) {
   const supabase = await createClient();
@@ -162,7 +163,7 @@ export async function release_request_lock(userId: string): Promise<void> {
 
 
 
-export async function insertIntoJobTable(jobDetails: AdapterJob) {
+export async function insertIntoJobTable(supabase: SupabaseClient, jobDetails: AdapterJob) {
 
   const {
   ats_provider,
@@ -193,8 +194,6 @@ const jobInsert = {
   content,
   raw_json,
 }
-
-  const supabase = await createClient()
   
   const { data: jobId, error } = await supabase
     .from('jobs')
@@ -203,97 +202,90 @@ const jobInsert = {
 
   if (error) {
     console.error("Error during upsert:", error);
-    return null; // Return null or handle the error
+    return null; 
+  }
+  
+  if (!jobId || jobId.length === 0) {
+    console.error("Upsert succeeded but did not return an ID.");
+    return null;
   }
 
-  // jobId is an object array and will contain one object for now Id (subject to change)
+  // jobId is an object array and will contain one object for id
   return jobId[0].id;
 }
 
 
-export async function InsertToJobUpdatesTable(jobDetails: AdapterJob) {
-  const supabase = await createClient();
+export async function InsertToJobUpdatesTable(supabase: SupabaseClient, job_Id: string, jobDetails: AdapterJob) {
+    const { updated_at: incomingAtsUpdatedAt } = jobDetails;
 
-  const {
-    ats_provider,
-    tenant_slug,
-    external_job_id,
-    updated_at: incomingAtsUpdatedAt,
-  } = jobDetails;
+    // 1. Fetch the job row (only need existing updated_at)
+    const { data: jobRow, error: fetchError } = await supabase
+        .from("jobs")
+        .select("updated_at")
+        .eq("id", job_Id)
+        .single(); // Use single since we know the ID exists
 
-  // Step 1: Fetch the job row
-  const { data: jobRow, error: fetchError } = await supabase
-    .from("jobs")
-    .select("id, updated_at")
-    .eq("ats", ats_provider)
-    .eq("tenant_slug", tenant_slug)
-    .eq("external_job_id", external_job_id)
-    .maybeSingle();
-
-  if (fetchError || !jobRow) {
-    console.error("[InsertToJobUpdates] Failed to fetch job:", fetchError);
-    return null;
-  }
-
-  const jobId = jobRow.id;
-  const existingUpdatedAt = jobRow.updated_at;
-  const incomingTime = new Date(incomingAtsUpdatedAt).getTime();
-  const existingTime = new Date(existingUpdatedAt).getTime();
-
-  // Step 2: Insert into job_updates if incoming is older
-  if (incomingTime < existingTime) {
-    const { error: updateError } = await supabase
-      .from("job_updates")
-      .insert({
-        job_id: jobId,
-        ats_updated_at: incomingAtsUpdatedAt,
-        seen_at: new Date().toISOString(),
-      });
-
-    if (updateError) {
-      console.error("[InsertToJobUpdates] Failed to insert job_update:", updateError);
+    if (fetchError || !jobRow) {
+        console.error("[updateJobTimeline] Failed to fetch job timeline data:", fetchError);
+        return false;
     }
-  }
+
+    const existingUpdatedAt = jobRow.updated_at;
+    const incomingTime = new Date(incomingAtsUpdatedAt).getTime();
+    const existingTime = new Date(existingUpdatedAt).getTime();
+
+    // 2. Insert into job_updates ONLY if incoming is newer
+    if (incomingTime > existingTime) {
+      const { error: updateError } = await supabase
+        .from("job_updates")
+        .insert({
+          job_id: job_Id,
+          ats_updated_at: incomingAtsUpdatedAt
+        });
+
+      if (updateError) {
+        console.error("[InsertToJobUpdates] Failed to insert job_update:", updateError);
+      }
+    }
 
   // Step 3: Always update last_seen
   const { error: seenError } = await supabase
     .from("jobs")
     .update({ last_seen: new Date().toISOString() })
-    .eq("id", jobId);
+    .eq("id", job_Id);
 
   if (seenError) {
     console.error("[InsertToJobUpdates] Failed to update last_seen:", seenError);
   }
-
-  return jobId;
 }
 
 
 
-export async function InsertIntoJobFeaturesTable(jobFeatures:dbJobFeatures) {
-  const supabase = await createClient()
 
+export async function InsertIntoJobFeaturesTable(supabase: SupabaseClient, jobFeatures:dbJobFeatures) {
+  const { job_id, ...featureFields } = jobFeatures;
 
-    const { job_id, ...featureFields } = jobFeatures
-
-  await supabase.from('job_features').upsert(
-      [
-        {
-          job_id,
-          ...featureFields,
-        },
-      ],
-      { onConflict: 'job_id' }
-    )
+  const { error } = await supabase.from('job_features').upsert(
+    [
+       {
+        job_id,
+        ...featureFields,
+       },
+    ],
+    { onConflict: 'job_id' }
+  );
+  
+  if (error) {
+    console.error("Error upserting job_features:", error);
+  }
 }
 
-export async function InsertStructuredJobFeatures(jobDetails: AdapterJob) {
-  const jobId = await insertIntoJobTable(jobDetails);
+export async function InsertStructuredJobFeatures(supabase: SupabaseClient, job_Id: string, jobDetails: AdapterJob) {
 
   const featuresNormalized = await analyzeAdapterJob(jobDetails);
 
   const sanitized: dbJobFeatures = {
-    job_id: jobId,
+    job_id: job_Id,
     time_type: featuresNormalized.time_type ?? null,
     salary_min: featuresNormalized.salary_min ?? null,
     salary_mid: featuresNormalized.salary_mid ?? null,
@@ -303,79 +295,33 @@ export async function InsertStructuredJobFeatures(jobDetails: AdapterJob) {
     salary_source: featuresNormalized.salary_source ?? null,
   };
 
-  await InsertIntoJobFeaturesTable(sanitized);
-
-  return jobId;
+  await InsertIntoJobFeaturesTable(supabase, sanitized);
 }
 
 //This function is primarily for the job ingestion workflow
 //Accepts jobDetails as input
 //Gets the current user and job ID and Links them in user_job_check
 //Returns a success flag
-
-export async function InsertIntoUserJobCheckTable(jobDetails: AdapterJob) {
-  const supabase = await createClient()
-  const jobId = await insertIntoJobTable(jobDetails)
-  const user = await getUser()
-
-  if (!jobId || 'error' in user) {
-    console.error('Failed to link user to job:', jobId, user)
-    return false
-  }
-
-  await supabase.from('user_job_check').upsert([
+export async function InsertIntoUserJobCheckTable(supabase: SupabaseClient, user_Id: string, job_Id: string, job_ats_updated_at: string | null) {
+  const { error } = await supabase.from('user_job_checks').upsert([
     {
-      user_id: user.id,
-      job_id: jobId,
+      user_id: user_Id,
+      job_id: job_Id,
+      ats_updated_at: job_ats_updated_at,
     },
-  ], { onConflict: 'user_id,job_id' })
-
-  return true
-}
-
-
-//If the job is new, it gets inserted and linked.
-//If the job already exists, it just links the current user.
-//Won’t get duplicate jobs or links.
-export async function saveJobFromDetails(jobDetails: AdapterJob) {
-  const jobId = await insertIntoJobTable(jobDetails)
-  const user = await getUser()
-
-  if (!jobId || 'error' in user) {
-    console.error('Failed to save job:', jobId, user)
-    return false
+  ], { onConflict: 'user_id,job_id' });
+  
+  if (error) {
+    console.error('Failed to link user to job:', error);
+    return false;
   }
-
-  return await SaveJob(user.id, jobId)
+  
+  return true;
 }
 
 
-// Link an existing job to a user (saving a job)
-export async function SaveJob(userId: string, jobId: string) {
-  const supabase = await createClient()
 
-  await supabase.from('user_job_check').upsert([
-    {
-      user_id: userId,
-      job_id: jobId,
-    },
-  ], { onConflict: 'user_id,job_id' })
 
-}
 
-export async function unsaveJob(userId: string, jobId: string) {
-  const supabase = await createClient()
-  return await supabase
-    .from('user_job_check')
-    .delete()
-    .eq('user_id', userId)
-    .eq('job_id', jobId)
-}
 
-export async function getSavedJobs(userId: string) {
-  const supabase = await createClient()
-  return await supabase
-    .from('user_job_check')
-    .select('job_id, jobs(*)')
-    .eq('user_id', userId)
-}
+
