@@ -32,7 +32,7 @@ const ZJobNLP = z.object({
 });
 
 export type JobNLP = z.infer<typeof ZJobNLP>;
-export type Combined = Partial<DBFeatures> & Partial<JobNLP>;
+export type Combined = Partial<DBFeatures> & Partial<JobNLP>; 
 
 const EmptyNLP: JobNLP = {
   time_type: null, location: null, salary_min: null, salary_max: null, salary_mid: null,
@@ -58,9 +58,9 @@ function pickLocationName(job: AdapterJob): string | null {
 }
 
 // ensures the deterministic value always overrides the LLM value if it exists (v !== undefined && v !== null).
-function mergePreferDeterministic<T extends object, U extends object>(det: T, ai: U): T & U {
+function mergePreferDeterministic<T extends object, U extends object>(deterministic: T, ai: U): T & U {
   const out: any = { ...ai };
-  for (const [k, v] of Object.entries(det)) {
+  for (const [k, v] of Object.entries(deterministic)) {
     if (v !== undefined && v !== null) out[k] = v; // deterministic wins if defined
   }
   return out;
@@ -112,11 +112,9 @@ export async function analyzeAdapterJob(job: AdapterJob): Promise<Combined> {
         delete f2.salary_min;
         delete f2.salary_max;
         delete f2.salary_mid;
-        delete f2.salary_source;
     }
     }
     
-
     features = f2;
 
     // 3) LLM Schema with fields
@@ -148,7 +146,7 @@ export async function analyzeAdapterJob(job: AdapterJob): Promise<Combined> {
             content:
                 "You are a structured information extractor for job postings. " +
                 "Return ONLY valid JSON that matches the provided JSON Schema. " +
-                "If a value is not explicitly stated, return null. Never invent values. " +
+                "All fields must be present in the output object. If a value is missing or unknown, set it to null. Do not omit any keys or return undefined " +
                 "Extract location from content which must be a human-readable geography (city + state/province + country if present)). " +
                 "Currency must be the three-letter ISO 4217 code (e.g., USD, CAD, GBP)." 
             },
@@ -186,6 +184,7 @@ export async function analyzeAdapterJob(job: AdapterJob): Promise<Combined> {
     // If the LLM didn’t give a location, try to pull a deterministic one from the adapter.
     aiData.location ??= pickLocationName(job); 
 
+    aiData.time_type ??= null;
     // Merge features and aiData with a rule that deterministic values are priority if they’re defined.
     const merged = mergePreferDeterministic(features, aiData);
 

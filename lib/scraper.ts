@@ -6,6 +6,7 @@ import {
   extractWebFeaturesFromText,
 } from "../lib/normalizers/web";
 import { canFetchUrl } from "./robots";
+import { webAdapter } from "../lib/adapters/web";
 
 /**
  * Strict denylist for aggregator/marketing boards; add as needed
@@ -82,7 +83,7 @@ function parseGreenhouseTenantAndJob(url: URL): { tenant: string; jobId: string 
  */
 export async function scrapeJobFromUrl(
   urlStr: string
-): Promise<AdapterJob | Record<string, unknown> | null> {
+): Promise<AdapterJob | null> {
   let url: URL;
   try {
     url = new URL(urlStr);
@@ -122,28 +123,10 @@ export async function scrapeJobFromUrl(
     // If it's a GH host but not a parsable path, fall through to generic fetch.
   }
 
-  // 4) Generic one-shot fetch + web adapter extraction
-  let html: string;
-  try {
-    const res = await fetch(url.toString(), {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (compatible; JobBustersBot/1.0; +https://example.com/bot)",
-        Accept: "text/html,application/xhtml+xml",
-      },
-    });
-    if (!res.ok) throw new Error(`Fetch failed with status ${res.status}`);
-    html = await res.text();
-  } catch (err) {
-    throw new Error(`Fetch failed (${(err as Error).message})`);
-  }
-
-  // Prefer structured data, then fill from text.
-  const jsonldFeatures = extractWebFeaturesFromJsonLd(html);
-  const textFeatures = extractWebFeaturesFromText(html);
-  const features = { ...textFeatures, ...jsonldFeatures };
-
-  return features;
+  // 4) 
+    console.log(`Using generic web adapter for: ${url.toString()}`);
+    return await webAdapter(url.toString()); // returns full adapter object from webAdapter 
+   
 }
 
 export default scrapeJobFromUrl;

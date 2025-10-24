@@ -3,6 +3,7 @@ import React, { useState, useEffect } from "react";
 import { toast } from "react-toastify";
 import { analyzeJob, type Tier, type RiskResult } from "../lib/analyzeJob";
 import { logout } from "@/utils/supabase/action";
+import { saveJobCheck } from '@/app/api/data-ingestion/save-job';
 
 const SAMPLE_JOB = `We're looking for a rockstar developer to join our dynamic team! This is a fast-paced environment where you'll wear many hats and be a self-starter.
 
@@ -53,6 +54,7 @@ export default function GhostJobChecker() {
   const [displayScore, setDisplayScore] = useState(0);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isFetching, setIsFetching] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [fetchError, setFetchError] = useState("");
 
   const isValidUrl = (url: string) => {
@@ -77,11 +79,8 @@ export default function GhostJobChecker() {
     }
   };
 
-  const isFormValid =
-    Boolean(jobUrl.trim()) &&
-    isValidUrl(jobUrl) &&
-    Boolean(jobDescription.trim());
-
+  // VALIDATION: Only require jobUrl to be valid now, as the server handles content fetching.
+  const isFormValid = Boolean(jobUrl.trim()) && isValidUrl(jobUrl);
   // Score animation
   useEffect(() => {
     if (!result) return;
@@ -112,89 +111,54 @@ export default function GhostJobChecker() {
     requestAnimationFrame(animate);
   }, [result]);
 
-  const handleFetchUrl = async () => {
-    if (!jobUrl.trim()) {
-      toast.error("Please enter a job URL");
+
+
+  //  (Analyze Job Posting button handler)
+  const handleAnalyze = async () => {
+    if (!jobUrl.trim() || !isValidUrl(jobUrl)) { // url validation 
+      toast.error("Please enter a valid Job URL");
       return;
     }
-
-    if (!isValidUrl(jobUrl)) {
-      toast.error("Please enter a valid URL");
-      return;
-    }
-
-    if (!isGreenhouseUrl(jobUrl)) {
-      toast.info(
-        "Auto-fetch works only for greenhouse.io right now. Please paste the job description instead."
-      );
-      return;
-    }
-
-    setIsFetching(true);
+    
+    //  (UI update)
+    setIsAnalyzing(true);
+    setIsSaving(true);
     setFetchError("");
 
-    try {
-      const response = await fetch(jobUrl);
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const text = await response.text();
-      setJobDescription(text);
-      toast.success("Fetched job description from URL");
-    } catch (_error) {
-      setFetchError(
-        "Couldn't fetch due to site restrictions—please paste the job description instead."
-      );
-      toast.error(
-        "Fetch blocked by CORS/site rules. Paste the job description."
-      );
-    } finally {
-      setIsFetching(false);
-    }
-  };
-
-  const handleAnalyze = async () => {
-    if (!jobUrl.trim()) {
-      toast.error("Job URL is required");
-      return;
-    }
-    if (!isValidUrl(jobUrl)) {
-      toast.error("Please enter a valid URL");
-      return;
-    }
-
-    // Show accuracy warning if non-Greenhouse URL
     if (!isGreenhouseUrl(jobUrl)) {
       toast.warning(
-        "Heads up: this URL isn't from greenhouse.io. We couldn't fetch/verify it, so results may be less accurate."
+        "Heads up: Server will now attempt to fetch content from this URL."
       );
     }
 
-    if (!jobDescription.trim()) {
-      toast.error("Job description is required");
-      return;
-    }
-
-    setIsAnalyzing(true);
-    setFetchError("");
-
-    // Simulate processing time
-    await new Promise((resolve) => setTimeout(resolve, 800));
-
-    const analysisResult = analyzeJob(jobDescription);
-    setResult(analysisResult);
+    // The server will handle: Fetching content, Authentication, and DB Insertion.
+    const saveResult = await saveJobCheck(jobUrl); 
+    
+    setIsSaving(false);
     setIsAnalyzing(false);
 
-    toast[analysisResult.tier === "High" ? "warning" : "success"](
-      `Analysis complete — ${analysisResult.tier} risk`
-    );
+    // 4. Client-side result handling
+    if (saveResult.success) {        
+        console.log("Job successfully saved to database."); 
+        toast.success("Job successfully saved to your history.");
+        
+    } else {
+        console.error("Error saving job:", saveResult.error);
+        
+        // Handle specific auth error, prompting the user to log in
+        if (saveResult.error && saveResult.error.includes("Authentication required")) {
+             toast.error("Please log in to save and track your job checks.");
+             // Optional: router.push("/auth/login");
+        } else {
+             // Handle generic server or fetching failure
+             toast.error(`Ingestion Failed: ${saveResult.error}`);
+        }
+    }
   };
-
+  
   const handleTrySample = async () => {
     setJobUrl("https://example.com/job/123");
-    setJobDescription(SAMPLE_JOB);
+    //setJobDescription(SAMPLE_JOB);
     setIsAnalyzing(true);
 
     await new Promise((resolve) => setTimeout(resolve, 600));
@@ -232,6 +196,12 @@ export default function GhostJobChecker() {
     if (score < 70) return "#d97706";
     return "#dc2626";
   };
+
+    const buttonText = isAnalyzing
+    ? "Analyzing..."
+    : isSaving
+    ? "Saving Check..."
+    : "Analyze Job Posting";
 
   return (
     <>
@@ -330,16 +300,6 @@ export default function GhostJobChecker() {
                     className="flex-1 px-4 py-2 border border-gray-300 text-black rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                     data-testid="url-input"
                   />
-                  <button
-                    onClick={handleFetchUrl}
-                    disabled={isFetching || !jobUrl.trim()}
-                    className="px-6 py-2 bg-orange-100 text-orange-700 border border-orange-200 rounded-lg hover:bg-orange-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
-                  >
-                    {isFetching && (
-                      <div className="w-4 h-4 border-2 border-orange-600 border-t-transparent rounded-full animate-spin" />
-                    )}
-                    Fetch From URL (beta)
-                  </button>
                 </div>
                 <p className="text-xs text-gray-500 mt-1">
                   Required: Valid job posting URL (Greenhouse URLs supported for
@@ -347,7 +307,7 @@ export default function GhostJobChecker() {
                 </p>
               </div>
 
-              {/* Job Description */}
+              {/* Job Description  DEPRECATED FOR NOW*/}
               <div>
                 <label
                   htmlFor="job-description"
@@ -381,15 +341,15 @@ export default function GhostJobChecker() {
               <div className="flex flex-col sm:flex-row gap-3">
                 <button
                   onClick={handleAnalyze}
-                  disabled={isAnalyzing || !isFormValid}
+                  disabled={isAnalyzing || isSaving || !isFormValid}
                   className="flex-1 sm:flex-none px-8 py-3 bg-orange-600 hover:bg-orange-700 text-white font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                   data-testid="analyze-btn"
                 >
-                  {isAnalyzing && (
+                {(isAnalyzing || isSaving) && (
                     <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  )}
-                  Analyze Job Posting
-                </button>
+                        )}
+                        {buttonText}
+                       </button>
 
                 <button
                   onClick={handleTrySample}

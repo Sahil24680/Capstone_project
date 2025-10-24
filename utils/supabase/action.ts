@@ -1,6 +1,10 @@
 "use server";
 import { createClient } from "./server";
 import { redirect } from "next/navigation";
+import type { AdapterJob } from "@/lib/adapters/types";   
+import type { dbJobFeatures } from "@/lib/db/jobFeatures.ts";   
+import {analyzeAdapterJob} from "@/lib/nlp/client";
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 export async function login(formData: FormData) {
   const supabase = await createClient();
@@ -156,3 +160,168 @@ export async function release_request_lock(userId: string): Promise<void> {
     .eq("user_id", userId);
   if (error) console.error("[release_request_lock] release error:", error);
 }
+
+
+
+export async function insertIntoJobTable(supabase: SupabaseClient, jobDetails: AdapterJob) {
+
+  const {
+  ats_provider,
+  tenant_slug,
+  external_job_id,
+  title,
+  company_name,
+  location,
+  absolute_url,
+  first_published,
+  updated_at,
+  requisition_id,
+  content,
+  raw_json,
+} = jobDetails //jobFeatures is not in the jobs table so take it out
+
+const jobInsert = {
+  ats: ats_provider, // ats_provider in database
+  tenant_slug,
+  external_job_id,
+  title,
+  company_name,
+  location,
+  absolute_url,
+  first_published,
+  updated_at,
+  requisition_id,
+  content,
+  raw_json,
+}
+  
+  const { data: jobId, error } = await supabase
+    .from('jobs')
+    .upsert([jobInsert], { onConflict: 'ats,tenant_slug,external_job_id' }) // composite key either returns new key or reuse if duplicate
+    .select('id'); 
+
+  if (error) {
+    console.error("Error during upsert:", error);
+    return null; 
+  }
+  
+  if (!jobId || jobId.length === 0) {
+    console.error("Upsert succeeded but did not return an ID.");
+    return null;
+  }
+
+  // jobId is an object array and will contain one object for id
+  return jobId[0].id;
+}
+
+
+export async function InsertToJobUpdatesTable(supabase: SupabaseClient, job_Id: string, jobDetails: AdapterJob) {
+    const { updated_at: incomingAtsUpdatedAt } = jobDetails;
+
+    // 1. Fetch the job row (only need existing updated_at)
+    const { data: jobRow, error: fetchError } = await supabase
+        .from("jobs")
+        .select("updated_at")
+        .eq("id", job_Id)
+        .single(); // Use single since we know the ID exists
+
+    if (fetchError || !jobRow) {
+        console.error("[updateJobTimeline] Failed to fetch job timeline data:", fetchError);
+        return false;
+    }
+
+    const existingUpdatedAt = jobRow.updated_at;
+    const incomingTime = new Date(incomingAtsUpdatedAt).getTime();
+    const existingTime = new Date(existingUpdatedAt).getTime();
+
+    // 2. Insert into job_updates ONLY if incoming is newer
+    if (incomingTime > existingTime) {
+      const { error: updateError } = await supabase
+        .from("job_updates")
+        .insert({
+          job_id: job_Id,
+          ats_updated_at: incomingAtsUpdatedAt
+        });
+
+      if (updateError) {
+        console.error("[InsertToJobUpdates] Failed to insert job_update:", updateError);
+      }
+    }
+
+  // Step 3: Always update last_seen
+  const { error: seenError } = await supabase
+    .from("jobs")
+    .update({ last_seen: new Date().toISOString() })
+    .eq("id", job_Id);
+
+  if (seenError) {
+    console.error("[InsertToJobUpdates] Failed to update last_seen:", seenError);
+  }
+}
+
+
+
+
+export async function InsertIntoJobFeaturesTable(supabase: SupabaseClient, jobFeatures:dbJobFeatures) {
+  const { job_id, ...featureFields } = jobFeatures;
+
+  const { error } = await supabase.from('job_features').upsert(
+    [
+       {
+        job_id,
+        ...featureFields,
+       },
+    ],
+    { onConflict: 'job_id' }
+  );
+  
+  if (error) {
+    console.error("Error upserting job_features:", error);
+  }
+}
+
+export async function InsertStructuredJobFeatures(supabase: SupabaseClient, job_Id: string, jobDetails: AdapterJob) {
+
+  const featuresNormalized = await analyzeAdapterJob(jobDetails);
+
+  const sanitized: dbJobFeatures = {
+    job_id: job_Id,
+    time_type: featuresNormalized.time_type ?? null,
+    salary_min: featuresNormalized.salary_min ?? null,
+    salary_mid: featuresNormalized.salary_mid ?? null,
+    salary_max: featuresNormalized.salary_max ?? null,
+    currency: featuresNormalized.currency ?? null,
+    department: featuresNormalized.department ?? null,
+    salary_source: featuresNormalized.salary_source ?? null,
+  };
+
+  await InsertIntoJobFeaturesTable(supabase, sanitized);
+}
+
+//This function is primarily for the job ingestion workflow
+//Accepts jobDetails as input
+//Gets the current user and job ID and Links them in user_job_check
+//Returns a success flag
+export async function InsertIntoUserJobCheckTable(supabase: SupabaseClient, user_Id: string, job_Id: string, job_ats_updated_at: string | null) {
+  const { error } = await supabase.from('user_job_checks').upsert([
+    {
+      user_id: user_Id,
+      job_id: job_Id,
+      ats_updated_at: job_ats_updated_at,
+    },
+  ], { onConflict: 'user_id,job_id' });
+  
+  if (error) {
+    console.error('Failed to link user to job:', error);
+    return false;
+  }
+  
+  return true;
+}
+
+
+
+
+
+
+
