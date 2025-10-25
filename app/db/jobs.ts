@@ -1,4 +1,4 @@
-import type { AdapterJob } from "../adapters/types";
+import type { AdapterJob } from "@/lib/adapters/types";
 import {
   insertIntoJobTable,
   InsertToJobUpdatesTable,

@@ -1,4 +1,4 @@
-// lib/robots.ts
+// app/other/robots.ts
 
 /**
  * Minimal robots.txt fetcher + parser + evaluator.

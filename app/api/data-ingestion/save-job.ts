@@ -3,9 +3,9 @@
 
 import { createClient } from '@/utils/supabase/server';   // 1. Client for getting the USER'S session
 import { createClient as createAdminClient } from '@supabase/supabase-js';  // 2. Client for ADMIN database operations (to bypasses RLS)
-import { ingestUserJobPosting } from '@/lib/db/jobs';
+import { ingestUserJobPosting } from '@/app/db/jobs';
 import type { AdapterJob } from '@/lib/adapters/types';
-import { scrapeJobFromUrl } from '@/lib/scraper';
+import { scrapeJobFromUrl } from '@/app/other/scraper';
 
 
 // The function that runs on the server and handles the database work

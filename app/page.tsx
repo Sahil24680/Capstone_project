@@ -1,7 +1,7 @@
 "use client";
 import React, { useState, useEffect } from "react";
 import { toast } from "react-toastify";
-import { analyzeJob, type Tier, type RiskResult } from "../lib/analyzeJob";
+import { analyzeJob, type Tier, type RiskResult } from "@/app/orchestrator/analyzeJob";
 import { logout } from "@/utils/supabase/action";
 import { saveJobCheck } from '@/app/api/data-ingestion/save-job';
 

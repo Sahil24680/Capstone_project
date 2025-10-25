@@ -1,12 +1,12 @@
-// lib/scraper.ts
-import type { AdapterJob } from "../lib/adapters/types";
-import { greenhouseAdapter } from "../lib/adapters/greenhouse";
+// app/other/scraper.ts
+import type { AdapterJob } from "@/lib/adapters/types";
+import { greenhouseAdapter } from "@/lib/adapters/greenhouse";
 import {
   extractWebFeaturesFromJsonLd,
   extractWebFeaturesFromText,
-} from "../lib/normalizers/web";
-import { canFetchUrl } from "./robots";
-import { webAdapter } from "../lib/adapters/web";
+} from "@/lib/normalizers/web";
+import { canFetchUrl } from "@/app/other/robots";
+import { webAdapter } from "@/lib/adapters/web";
 
 /**
  * Strict denylist for aggregator/marketing boards; add as needed

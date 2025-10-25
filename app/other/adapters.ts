@@ -1,6 +1,6 @@
-// lib/adapters.ts
-import { greenhouseAdapter } from "./adapters/greenhouse";
-import { webAdapter } from "./adapters/web";
+// app/other/adapters.ts
+import { greenhouseAdapter } from "@/lib/adapters/greenhouse";
+import { webAdapter } from "@/lib/adapters/web";
 
 type GreenhouseFn = (tenant_slug: string, external_job_id: string) => Promise<any>;
 type WebFn = (url: string) => Promise<any>;

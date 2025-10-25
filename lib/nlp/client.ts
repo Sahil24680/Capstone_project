@@ -6,7 +6,7 @@
 import OpenAI from "openai";
 import { z } from "zod";
 import type { AdapterJob } from "../adapters/types";
-import { dbJobFeatures } from "../db/jobFeatures";
+import { dbJobFeatures } from "@/app/db/jobFeatures";
 import { extractGhFeaturesFromMetadata, extractSalaryFromText, htmlToPlainText, finalizeSalary } from "../normalizers/greenhouse";
 
 // ---- OpenAI client ----
