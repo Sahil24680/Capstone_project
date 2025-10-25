@@ -2,7 +2,7 @@
 import { createClient } from "./server";
 import { redirect } from "next/navigation";
 import type { AdapterJob } from "@/lib/adapters/types";   
-import type { dbJobFeatures } from "@/lib/db/jobFeatures.ts";   
+import type { dbJobFeatures } from "@/app/db/jobFeatures";   
 import {analyzeAdapterJob} from "@/lib/nlp/client";
 import type { SupabaseClient } from '@supabase/supabase-js';
 

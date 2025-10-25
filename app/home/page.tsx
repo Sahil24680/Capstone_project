@@ -11,7 +11,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { samplePosts, buzzwords } from "@/lib/constants";
-import { analyzeJob } from "@/lib/analyzeJob";
+import { analyzeJob } from "@/app/orchestrator/analyzeJob";
 
 interface RiskResult {
   score: number;

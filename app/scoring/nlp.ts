@@ -1,8 +1,8 @@
-// lib/scoring/nlp.ts
-import { analyzeAdapterJob, Combined, pickContent } from "../nlp/client"; 
-import { analysis, analysisWithLLM } from "../nlp/index";           
-import { htmlToPlainText } from "../normalizers/greenhouse";        
-import type { AdapterJob } from "../adapters/types";      
+// app/scoring/nlp.ts
+import { analyzeAdapterJob, Combined, pickContent } from "@/lib/nlp/client"; 
+import { analysis, analysisWithLLM } from "@/lib/nlp/index";           
+import { htmlToPlainText } from "@/lib/normalizers/greenhouse";        
+import type { AdapterJob } from "@/lib/adapters/types";      
 
 
 export type scoringTypes = {

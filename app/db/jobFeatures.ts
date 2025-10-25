@@ -1,4 +1,4 @@
-// lib/db/jobFeatures.ts
+// app/db/jobFeatures.ts
 
 // Upsert job features to the database 
 
