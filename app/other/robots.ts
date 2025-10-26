@@ -1,5 +1,3 @@
-// app/other/robots.ts
-
 /**
  * Minimal robots.txt fetcher + parser + evaluator.
  * Implements "longest-match wins" with Allow beating Disallow on ties (Google behavior).
@@ -49,7 +47,7 @@ async function fetchWithTimeout(
 
 /** Normalize a scheme+host (no path). */
 function originOf(u: URL): string {
-  // We deliberately exclude port normalization edge cases; URL handles it.
+  // Deliberately exclude port normalization edge cases; URL handles it.
   return `${u.protocol}//${u.host}`;
 }
 
@@ -198,7 +196,7 @@ export function isAllowedByRobots(pageUrl: URL, profile: RobotsProfile): boolean
 
 /**
  * Convenience wrapper: returns true if robots ALLOW fetching this URL.
- * If robots.txt fetch fails (network, 404, etc.), we default to ALLOW
+ * If robots.txt fetch fails (network, 404, etc.), default to ALLOW
  * (many crawlers default this way; adjust if fail-closed is preferred).
  */
 export async function canFetchUrl(

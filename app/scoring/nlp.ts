@@ -1,8 +1,7 @@
-// app/scoring/nlp.ts
-import { analyzeAdapterJob, Combined, pickContent } from "@/lib/nlp/client"; 
-import { analysis, analysisWithLLM } from "@/lib/nlp/index";           
-import { htmlToPlainText } from "@/lib/normalizers/greenhouse";        
-import type { AdapterJob } from "@/lib/adapters/types";      
+import { analyzeAdapterJob, Combined, pickContent } from "@/app/api/data-ingestion/nlp/client"; 
+import { analysis, analysisWithLLM } from "@/app/api/data-ingestion/nlp/index";           
+import { htmlToPlainText } from "@/app/api/data-ingestion/adapters/util";        
+import type { AdapterJob } from "@/app/api/data-ingestion/adapters/types";
 
 
 export type scoringTypes = {
@@ -12,7 +11,7 @@ export type scoringTypes = {
 
 export async function analyzeAndScoreJob(jobData: AdapterJob): Promise<scoringTypes> {
     
-    // This gives us the database fields 
+    // Gives database fields 
     const features: Combined = await analyzeAdapterJob(jobData);
 
     // Re-extract the clean text from the job object for the second LLM call.

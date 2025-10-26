@@ -1,9 +1,9 @@
 "use server";
 import { createClient } from "./server";
 import { redirect } from "next/navigation";
-import type { AdapterJob } from "@/lib/adapters/types";   
+import type { AdapterJob } from "@/app/api/data-ingestion/adapters/types";   
 import type { dbJobFeatures } from "@/app/db/jobFeatures";   
-import {analyzeAdapterJob} from "@/lib/nlp/client";
+import {analyzeAdapterJob} from "@/app/api/data-ingestion/nlp/client";
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 export async function login(formData: FormData) {
@@ -317,6 +317,36 @@ export async function InsertIntoUserJobCheckTable(supabase: SupabaseClient, user
   }
   
   return true;
+}
+
+/**
+ * Get job from database by composite key
+ * Returns job with features and updates table info
+ */
+export async function getJobByCompositeKey(
+  supabase: SupabaseClient,
+  ats: string,
+  tenant_slug: string,
+  external_job_id: string
+) {
+  const { data, error } = await supabase
+    .from('jobs')
+    .select(`
+      *,
+      job_features(*),
+      job_updates(*)
+    `)
+    .eq('ats', ats)
+    .eq('tenant_slug', tenant_slug)
+    .eq('external_job_id', external_job_id)
+    .maybeSingle();
+    
+  if (error) {
+    console.error("Error getting job by composite key:", error);
+    return null;
+  }
+  
+  return data;
 }
 
 

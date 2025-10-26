@@ -1,7 +1,7 @@
-// lib/adapters/web.ts
 import { z } from "zod";
 import type { AdapterJob } from "./types";
 import { fetchWithRetry, sha1Hex } from "./util";
+import { extractWebFeaturesFromJsonLd, extractWebFeaturesFromText } from "@/lib/normalizers/web";
 
 /** Tiny helper to decode a few common HTML entities in <script> contents. */
 function decodeBasicEntities(s: string): string {
@@ -149,6 +149,33 @@ export async function webAdapter(url: string): Promise<AdapterJob | null> {
       _ingest: { needsnlp: true },
     },
   };
+
+  // Extract features from web content with priority-based override logic
+  try {
+    // 1. Try JSON-LD extraction first (highest priority for web)
+    const jsonldFeatures = extractWebFeaturesFromJsonLd(html);
+    const featuresWithSource = { ...jsonldFeatures };
+    
+    // Mark JSON-LD features with highest priority
+    if (featuresWithSource.salary_source) {
+      featuresWithSource.salary_source = "jsonld";
+    }
+    
+    // 2. If no salary found in JSON-LD, try text extraction as fallback
+    if (!featuresWithSource.salary_min && !featuresWithSource.salary_max) {
+      const textFeatures = extractWebFeaturesFromText(html);
+      if (textFeatures.salary_min || textFeatures.salary_max) {
+        // Merge text features, but mark as text source (lower priority)
+        Object.assign(featuresWithSource, textFeatures);
+        featuresWithSource.salary_source = "text"; // Mark as text source
+      }
+    }
+    
+    normalized.features = featuresWithSource;
+  } catch (err) {
+    console.warn("Failed to extract web features:", err);
+    // Continue without features - NLP layer will handle fallback
+  }
 
   return normalized;
 }

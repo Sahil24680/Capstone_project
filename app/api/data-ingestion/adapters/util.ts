@@ -1,5 +1,4 @@
-// lib/adapters/util.ts
-import crypto from "node:crypto";
+import crypto from "crypto";
 
 export function sha1Hex(buf: Buffer | string): string {
   return crypto.createHash("sha1").update(buf).digest("hex");
@@ -182,3 +181,110 @@ export function htmlToPlainText(html: string): string {
     .trim();
   return textish;
 }
+
+/**
+ * Core salary extraction logic shared between web and greenhouse normalizers.
+ * Extracts salary ranges from text using consistent regex patterns and logic.
+ * 
+ * @param text - The text to search for salary information
+ * @returns Object with extracted salary data and metadata
+ */
+export function extractSalaryFromTextCore(text: string): {
+  salary_min: number | null;
+  salary_max: number | null;
+  currency: string | null;
+  comp_period: "hour" | "year";
+  found: boolean;
+} {
+  if (!text) {
+    return {
+      salary_min: null,
+      salary_max: null,
+      currency: null,
+      comp_period: "hour",
+      found: false
+    };
+  }
+
+  const s = String(text);
+
+  // Priority 1: Annual salary ranges with "per year" context (most reliable)
+  const annualRange = /\$?\s?(\d{1,3}(?:,\d{3})*)\s*(?:-|–|&mdash;|to)\s*\$?\s?(\d{1,3}(?:,\d{3})*)\s*(?:per\s+year|annually|annual)/i;
+  
+  // Priority 2: General salary ranges (6-digit numbers, likely annual)
+  const dollarsRange = /\$?\s?(\d{1,3}(?:,\d{3})*)\s*(?:-|–|&mdash;|to)\s*\$?\s?(\d{1,3}(?:,\d{3})*)/i;
+  
+  // Priority 3: "170k - 250k" format
+  const kRange = /\$?\s?(\d{1,3})\s*k\s*(?:-|–|to)\s*\$?\s?(\d{1,3})\s*k/i;
+  
+  // Priority 4: Single salary point (be careful with hourly)
+  const singleDollar = /\$\s?(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?)/;
+
+  let loNum: number | null = null;
+  let hiNum: number | null = null;
+  let sawDollarSymbol = false;
+  let isAnnual = false;
+
+  // Try annual range first (highest priority)
+  const m1 = s.match(annualRange);
+  if (m1) {
+    loNum = parseFloat(m1[1].replace(/,/g, ""));
+    hiNum = parseFloat(m1[2].replace(/,/g, ""));
+    sawDollarSymbol = /\$/.test(m1[0]);
+    isAnnual = true;
+  } else {
+    // Try general range
+    const m2 = s.match(dollarsRange);
+    if (m2) {
+      loNum = parseFloat(m2[1].replace(/,/g, ""));
+      hiNum = parseFloat(m2[2].replace(/,/g, ""));
+      sawDollarSymbol = /\$/.test(m2[0]);
+      // Check if it looks like annual (6-digit numbers)
+      isAnnual = loNum >= 10000 && hiNum >= 10000;
+    } else {
+      // Try k format
+      const m3 = s.match(kRange);
+      if (m3) {
+        const lo = parseFloat(m3[1]);
+        const hi = parseFloat(m3[2]);
+        if (!Number.isNaN(lo) && !Number.isNaN(hi)) {
+          loNum = lo * 1000;
+          hiNum = hi * 1000;
+          isAnnual = true; // k format is typically annual
+        }
+      } else {
+        // Try single dollar amount
+        const m4 = s.match(singleDollar);
+        if (m4) {
+          const v = parseFloat(m4[1].replace(/,/g, ""));
+          if (Number.isFinite(v)) {
+            loNum = v;
+            hiNum = v;
+            sawDollarSymbol = true;
+            // Single amounts are tricky - could be hourly or annual
+            isAnnual = v >= 10000; // Assume annual if >= 10k
+          }
+        }
+      }
+    }
+  }
+
+  if (loNum == null || hiNum == null || Number.isNaN(loNum) || Number.isNaN(hiNum)) {
+    return {
+      salary_min: null,
+      salary_max: null,
+      currency: null,
+      comp_period: "hour",
+      found: false
+    };
+  }
+
+  return {
+    salary_min: loNum,
+    salary_max: hiNum,
+    currency: sawDollarSymbol ? "USD" : null,
+    comp_period: isAnnual ? "year" : "hour",
+    found: true
+  };
+}
+

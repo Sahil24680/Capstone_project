@@ -1,5 +1,3 @@
-// lib/adapters/types.ts
-
 export type AtsProvider = "greenhouse" | "web";
 
 export type Provenance =
@@ -19,8 +17,8 @@ export type CanonicalCandidate = {
 export type FetchMeta = {
   status: number;
   ok: boolean;
-  started_at: string;   // ISO
-  finished_at: string;  // ISO
+  started_at: string;  
+  finished_at: string; 
   elapsed_ms: number;
 };
 
@@ -30,8 +28,8 @@ export type ContentMetrics = {
 };
 
 /**
- * Raw JSON we keep for provenance/debug/NLP.
- * We define the meta fields we know about, and allow arbitrary extras.
+ * Raw JSON kept for provenance/debug/NLP.
+ * Define known meta fields, allow arbitrary extras.
  */
 export type AdapterRawJson = {
   /** Optional source tag to note the origin */
@@ -43,7 +41,7 @@ export type AdapterRawJson = {
   /** HTTP fetch metadata for the adapter call */
   fetch?: FetchMeta;
 
-  /** Size & hash of the content we stored */
+  /** Size & hash of the content stored */
   content_metrics?: ContentMetrics;
 
   /** NLP ingestion flags, etc. */
@@ -63,8 +61,8 @@ export type AdapterJob = {
   location: string;
   absolute_url: string;
 
-  first_published: string | null; // ISO or null if unknown
-  updated_at: string;             // ISO
+  first_published: string | null; 
+  updated_at: string;             
 
   requisition_id: string | null;
 
