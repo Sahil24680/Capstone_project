@@ -1,4 +1,3 @@
-//lib/nlp/index.ts
 // Extra analysis with NLP
 
 import OpenAI from "openai";
@@ -13,7 +12,18 @@ export type analysis = {
 
 
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
+let client: OpenAI | null = null;
+
+function getOpenAIClient(): OpenAI {
+  if (!client) {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      throw new Error("OPENAI_API_KEY missing. Add it to .env.local for development or environment variables for production.");
+    }
+    client = new OpenAI({ apiKey });
+  }
+  return client;
+}
 
 const buzzwordList = 
 [ "rockstar",
@@ -32,7 +42,7 @@ export async function analysisWithLLM(
     temperature = 0.2
   }: {
     text: string;
-    // metadata is defined here if you need it (it's passed from scoring/nlp.ts)
+    // metadata is defined here if needed (passed from scoring/nlp.ts)
     metadata: { time_type?: string|null; currency?: string|null }; 
     model?: string;
     temperature?: number;
@@ -65,7 +75,7 @@ export async function analysisWithLLM(
         },
         required: ["hits","count"]
       },
-      comp_period_detected: { type: ["string","null"], enum: ["hour","year"] }
+      comp_period_detected: { type: "string", enum: ["hour","year"], nullable: true }
     },
     required: ["skills","buzzwords","comp_period_detected"]
   } as const;
@@ -95,7 +105,7 @@ export async function analysisWithLLM(
     const finalUserPrompt = userPrompt.join('\n'); // Rename variable for clarity
 
     try { 
-        const resp = await client.responses.create({
+        const resp = await getOpenAIClient().responses.create({
         model,
         temperature,
         input: [
@@ -121,7 +131,16 @@ export async function analysisWithLLM(
     .map((s: any) => ({ name: String(s.name).slice(0, 64) })) // Maps to { name: string }
     .slice(0, 20);
 
-    if (!["hour", "year", null].includes(parsed.comp_period_detected)) parsed.comp_period_detected = null;
+    // Validate comp_period_detected - ensure it's one of the expected values or null
+    if (typeof parsed.comp_period_detected === "string") {
+      if (parsed.comp_period_detected === "hour" || parsed.comp_period_detected === "year") {
+        // Keep the valid string value
+      } else {
+        parsed.comp_period_detected = null;
+      }
+    } else if (parsed.comp_period_detected !== null) {
+      parsed.comp_period_detected = null;
+    }
 
     return parsed as analysis; // Returns the clean type
     } catch(error)

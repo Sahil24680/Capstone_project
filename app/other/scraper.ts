@@ -1,12 +1,8 @@
-// app/other/scraper.ts
-import type { AdapterJob } from "@/lib/adapters/types";
-import { greenhouseAdapter } from "@/lib/adapters/greenhouse";
-import {
-  extractWebFeaturesFromJsonLd,
-  extractWebFeaturesFromText,
-} from "@/lib/normalizers/web";
+
+import type { AdapterJob } from "@/app/api/data-ingestion/adapters/types";
+import { greenhouseAdapter } from "@/app/api/data-ingestion/adapters/greenhouse";
 import { canFetchUrl } from "@/app/other/robots";
-import { webAdapter } from "@/lib/adapters/web";
+import { webAdapter } from "@/app/api/data-ingestion/adapters/web";
 
 /**
  * Strict denylist for aggregator/marketing boards; add as needed
@@ -112,7 +108,7 @@ export async function scrapeJobFromUrl(
   }
 
   // 3) ATS delegation — Greenhouse
-  //    Only when the URL is a GH boards URL we can parse for tenant + job ID.
+  //    Only when the URL is a GH boards URL can it be parsed for tenant + job ID.
   if (isGreenhouseBoards(url)) {
     const parsed = parseGreenhouseTenantAndJob(url);
     if (parsed) {
@@ -123,10 +119,8 @@ export async function scrapeJobFromUrl(
     // If it's a GH host but not a parsable path, fall through to generic fetch.
   }
 
-  // 4) 
-    console.log(`Using generic web adapter for: ${url.toString()}`);
-    return await webAdapter(url.toString()); // returns full adapter object from webAdapter 
-   
+  // 4) Generic web adapter extraction
+  return await webAdapter(url.toString());
 }
 
 export default scrapeJobFromUrl;

@@ -1,7 +1,4 @@
-// app/db/jobFeatures.ts
-
 // Upsert job features to the database 
-
 
 // fields in jobFeatures table
 export type dbJobFeatures = {
@@ -12,7 +9,7 @@ export type dbJobFeatures = {
   salary_max: number | null;
   currency: string | null;
   department: string | null;
-  salary_source: "metadata" | "text"  | null;
+  salary_source: "metadata" | "content" | "jsonld" | "text" | null;
 };
 
 

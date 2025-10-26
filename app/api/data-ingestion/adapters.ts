@@ -1,6 +1,6 @@
-// app/other/adapters.ts
-import { greenhouseAdapter } from "@/lib/adapters/greenhouse";
-import { webAdapter } from "@/lib/adapters/web";
+// Single "barrel" for adapter jobs--will grow as number of adapters grows
+import { greenhouseAdapter } from "./adapters/greenhouse";
+import { webAdapter } from "./adapters/web";
 
 type GreenhouseFn = (tenant_slug: string, external_job_id: string) => Promise<any>;
 type WebFn = (url: string) => Promise<any>;

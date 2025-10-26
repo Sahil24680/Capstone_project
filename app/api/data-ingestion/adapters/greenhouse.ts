@@ -1,7 +1,7 @@
-// lib/adapters/greenhouse.ts
 import { z } from "zod";
 import type { AdapterJob } from "./types";
 import { fetchWithRetry, sha1Hex } from "./util";
+import { extractGhFeaturesFromMetadata, extractSalaryFromText, type GHCanon } from "@/lib/normalizers/greenhouse";
 
 /** Some tenants put placeholder text in requisition_id. Normalize to null. */
 const isPlaceholderReqId = (v?: string | null): boolean => {
@@ -36,7 +36,7 @@ const ZGHMetadataItem = z
   .object({
     id: z.number().optional(),
     name: z.string().nullable().optional(),
-    value: z.union([ZGHCurrency, z.string(), z.null()]).optional(),
+    value: z.union([ZGHCurrency, z.string(), z.null(), z.array(z.any())]).optional(),
     value_type: z.string().nullable().optional(),
   })
   .catchall(z.unknown());
@@ -85,7 +85,7 @@ export async function greenhouseAdapter(
   const payloadUnknown: unknown = await res.json();
   const parsed = ZGreenhouseJob.safeParse(payloadUnknown);
 
-  // If parse fails, we still preserve raw_json, but be defensive pulling fields
+  // If parse fails, preserve raw_json, but be defensive pulling fields
   const p = parsed.success ? parsed.data : ({} as z.infer<typeof ZGreenhouseJob>);
 
   // Prefer parsed content; if that’s empty but raw payload has a string, use it.
@@ -150,6 +150,37 @@ if (!contentHtml) {
       _ingest: { needsnlp: true },
     },
   };
+
+  // Extract features from Greenhouse metadata
+  try {
+    const extractedFeatures = extractGhFeaturesFromMetadata(p.metadata);
+    
+    // Mark all extracted features as coming from ATS metadata (highest priority)
+    const featuresWithSource = { ...extractedFeatures };
+    if (featuresWithSource.salary_source) {
+      featuresWithSource.salary_source = "metadata"; // Override to indicate ATS metadata source
+    }
+    
+    // If no salary found in metadata, try content extraction as fallback
+    if (!featuresWithSource.salary_min && !featuresWithSource.salary_max && contentHtml) {
+      try {
+        const contentFeatures: GHCanon = {};
+        extractSalaryFromText(contentHtml, contentFeatures);
+        if (contentFeatures.salary_min || contentFeatures.salary_max) {
+          // Merge content features, but mark as content source (lower priority)
+          Object.assign(featuresWithSource, contentFeatures);
+          featuresWithSource.salary_source = "content"; // Mark as ATS content source
+        }
+      } catch (contentErr) {
+        console.warn("Failed to extract salary from content:", contentErr);
+      }
+    }
+    
+    normalized.features = featuresWithSource;
+  } catch (err) {
+    console.warn("Failed to extract Greenhouse features:", err);
+    // Continue without features - NLP layer will handle fallback
+  }
 
   return normalized;
 }

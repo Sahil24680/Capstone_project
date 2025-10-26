@@ -1,7 +1,7 @@
 "use client";
 import React, { useState, useEffect } from "react";
 import { toast } from "react-toastify";
-import { analyzeJob, type Tier, type RiskResult } from "@/app/orchestrator/analyzeJob";
+import { type Tier, type RiskResult } from "@/app/orchestrator/analyzeJob";
 import { logout } from "@/utils/supabase/action";
 import { saveJobCheck } from '@/app/api/data-ingestion/save-job';
 
@@ -89,7 +89,7 @@ export default function GhostJobChecker() {
       "(prefers-reduced-motion: reduce)"
     ).matches;
     if (prefersReducedMotion) {
-      setDisplayScore(result.score);
+      setDisplayScore(Math.round(result.score * 100));
       return;
     }
 
@@ -101,7 +101,7 @@ export default function GhostJobChecker() {
       const progress = Math.min((currentTime - startTime) / duration, 1);
 
       const easeOutQuart = 1 - Math.pow(1 - progress, 4);
-      setDisplayScore(Math.round(result.score * easeOutQuart));
+      setDisplayScore(Math.round(result.score * 100 * easeOutQuart));
 
       if (progress < 1) {
         requestAnimationFrame(animate);
@@ -142,6 +142,12 @@ export default function GhostJobChecker() {
         console.log("Job successfully saved to database."); 
         toast.success("Job successfully saved to your history.");
         
+        // Display the score if available
+        if (saveResult.score) {
+          setResult(saveResult.score);
+          toast.info(`Score: ${(saveResult.score.score * 100).toFixed(0)}/100`);
+        }
+        
     } else {
         console.error("Error saving job:", saveResult.error);
         
@@ -150,35 +156,28 @@ export default function GhostJobChecker() {
              toast.error("Please log in to save and track your job checks.");
              // Optional: router.push("/auth/login");
         } else {
-             // Handle generic server or fetching failure
-             toast.error(`Ingestion Failed: ${saveResult.error}`);
+             // Handle generic server or fetching failure - show user-friendly message
+             toast.error(saveResult.error || "Unable to process this job posting. Please try again later.");
         }
     }
   };
   
+  // Removed obsolete sample functions - they're not compatible with new analyzeJob signature
+  /*
   const handleTrySample = async () => {
     setJobUrl("https://example.com/job/123");
-    //setJobDescription(SAMPLE_JOB);
     setIsAnalyzing(true);
-
     await new Promise((resolve) => setTimeout(resolve, 600));
-
-    const analysisResult = analyzeJob(SAMPLE_JOB);
-    setResult(analysisResult);
     setIsAnalyzing(false);
   };
 
   const handleTryGreenhouseSample = async () => {
     setJobUrl("https://company.greenhouse.io/jobs/123456");
-    setJobDescription(GREENHOUSE_SAMPLE_JOB);
     setIsAnalyzing(true);
-
     await new Promise((resolve) => setTimeout(resolve, 600));
-
-    const analysisResult = analyzeJob(GREENHOUSE_SAMPLE_JOB);
-    setResult(analysisResult);
     setIsAnalyzing(false);
   };
+  */
 
   const getTierColor = (tier: Tier) => {
     switch (tier) {
@@ -192,9 +191,13 @@ export default function GhostJobChecker() {
   };
 
   const getGaugeColor = (score: number) => {
-    if (score < 40) return "#16a34a";
-    if (score < 70) return "#d97706";
-    return "#dc2626";
+    // score is 0.0-1.0, higher = lower risk
+    // 0.7-1.0 = Low Risk = Green
+    // 0.4-0.7 = Medium Risk = Yellow
+    // 0.0-0.4 = High Risk = Red
+    if (score >= 0.7) return "#16a34a"; // green for low risk
+    if (score >= 0.4) return "#d97706"; // yellow for medium risk
+    return "#dc2626"; // red for high risk
   };
 
     const buttonText = isAnalyzing
@@ -351,21 +354,6 @@ export default function GhostJobChecker() {
                         {buttonText}
                        </button>
 
-                <button
-                  onClick={handleTrySample}
-                  disabled={isAnalyzing}
-                  className="px-6 py-3 bg-white border border-orange-300 text-orange-700 font-medium rounded-lg hover:bg-orange-50 transition-colors disabled:opacity-50"
-                >
-                  Try Sample Job
-                </button>
-
-                <button
-                  onClick={handleTryGreenhouseSample}
-                  disabled={isAnalyzing}
-                  className="px-6 py-3 bg-white border border-green-300 text-green-700 font-medium rounded-lg hover:bg-green-50 transition-colors disabled:opacity-50"
-                >
-                  Try Greenhouse Sample
-                </button>
               </div>
             </div>
           </div>
@@ -423,14 +411,31 @@ export default function GhostJobChecker() {
                     </h4>
                     {result.redFlags.length > 0 ? (
                       <div className="flex flex-wrap gap-2">
-                        {result.redFlags.map((flag, index) => (
-                          <span
-                            key={index}
-                            className="inline-flex px-3 py-1 bg-red-100 text-red-800 text-sm rounded-full border border-red-200"
-                          >
-                            {flag}
-                          </span>
-                        ))}
+                        {result.redFlags.map((flag, index) => {
+                          // Map technical flag IDs to user-friendly messages
+                          const messageMap: Record<string, string> = {
+                            salary_min_present: "No minimum salary disclosed",
+                            salary_disclosure: "Incomplete salary disclosure",
+                            freshness: "Stale job posting",
+                            link_integrity: "Unreliable job link",
+                            buzzword_penalty: "Vague job description",
+                            skills_present: "Vague skill requirements",
+                            skills_detected: "Few specific skills mentioned", // legacy key
+                            source_credibility: "Low employer credibility",
+                          };
+                          
+                          // Use mapped message or default to original flag with better formatting
+                          const displayText = messageMap[flag] || flag.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase());
+                          
+                          return (
+                            <span
+                              key={index}
+                              className="inline-flex px-3 py-1 bg-red-100 text-red-800 text-sm rounded-full border border-red-200"
+                            >
+                              {displayText}
+                            </span>
+                          );
+                        })}
                       </div>
                     ) : (
                       <p className="text-gray-600 text-sm">
