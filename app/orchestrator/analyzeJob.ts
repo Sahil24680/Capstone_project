@@ -18,6 +18,58 @@ export interface RiskResult {
 }
 
 /**
+ * Generate user-friendly recommendations based on red flags detected
+ */
+function generateRecommendations(breakdown: Record<string, number>): string[] {
+  const recommendations: string[] = [];
+  
+  // Check if there are any red flags (scores < 0.5)
+  const hasRedFlags = Object.values(breakdown).some(score => score < 0.5);
+  
+  if (!hasRedFlags) {
+    recommendations.push("No ghosts detected! This looks like a legitimate opportunity.");
+    return recommendations;
+  }
+  
+  // Salary-related recommendations
+  const salaryFlags = ['salary_disclosure', 'salary_min_present'];
+  const hasMultipleSalaryFlags = salaryFlags.filter(flag => breakdown[flag] < 0.5).length >= 2;
+  
+  if (hasMultipleSalaryFlags) {
+    recommendations.push("This posting has unclear compensation details. Ask about salary ranges during the interview.");
+  } else {
+    if (breakdown.salary_disclosure < 0.5) {
+      recommendations.push("Ask about the salary range during the interview.");
+    }
+    if (breakdown.salary_min_present < 0.5) {
+      recommendations.push("No stated minimum salary may be intentionally vague, depending on the nature of the job.");
+    }
+  }
+  
+  // NLP-related recommendations
+  const nlpFlags = ['skills_present', 'buzzword_penalty'];
+  const hasMultipleNlpFlags = nlpFlags.filter(flag => breakdown[flag] < 0.5).length >= 2;
+  
+  if (hasMultipleNlpFlags) {
+    recommendations.push("Consider asking clarifying questions about the role and requirements - the description may be vague.");
+  } else {
+    if (breakdown.skills_present < 0.5) {
+      recommendations.push("Ask for a detailed job description with specific technical requirements.");
+    }
+    if (breakdown.buzzword_penalty < 0.5) {
+      recommendations.push("Seek concrete expectations and responsibilities beyond generic phrases.");
+    }
+  }
+  
+  // Freshness recommendation
+  if (breakdown.freshness < 0.5) {
+    recommendations.push("This posting may be stale. Verify the position is still actively hiring (posted >30 days ago).");
+  }
+  
+  return recommendations;
+}
+
+/**
  * Analyze a job URL and return scoring results
  * This is the main orchestrator that coordinates all components
  */
@@ -157,6 +209,9 @@ export async function analyzeJob(
     console.log(`[analyzeJob] Score breakdown:`, scoreResult.breakdown);
     const tier: Tier = scoreResult.score < 0.4 ? "High" : scoreResult.score < 0.7 ? "Medium" : "Low";
 
+    // Generate recommendations based on red flags
+    const recommendations = generateRecommendations(scoreResult.breakdown);
+
     return {
       success: true,
       jobId,
@@ -164,7 +219,7 @@ export async function analyzeJob(
         score: scoreResult.score,
         tier,
         redFlags: Object.keys(scoreResult.breakdown).filter(k => scoreResult.breakdown[k] < 0.5),
-        recommendations: []
+        recommendations
       },
       features,
       nlpAnalysis
